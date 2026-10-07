@@ -1,0 +1,44 @@
+{
+  "type": "model",
+  "series": 16,
+  "authority-id": "acme-robotics",
+  "brand-id": "acme-robotics",
+  "model": "acme-rover-v2",
+  "architecture": "x86_64",
+  "base": "core24",
+  "grade": "signed",
+  "classic": false,
+  "snaps": [
+    {
+      "name": "pc",
+      "id": "UqFziVZDHLSyO3TqSWgNBoAdHbLI4dAH",
+      "type": "gadget",
+      "default-channel": "24/stable",
+      "presence": "required"
+    },
+    {
+      "name": "pc-kernel",
+      "id": "pYVQrBcKmBa0mZ4CCN7ExT6jH8rY1hza",
+      "type": "kernel",
+      "default-channel": "22/stable"
+    },
+    {
+      "name": "core22",
+      "id": "amcUKQILKXHHTlmSa7NMdnXSx02dNeeT",
+      "type": "base",
+      "default-channel": "latest/stable"
+    },
+    {
+      "name": "rover-control",
+      "id": "ThisIsNotARealSnapIdAtAll123456x",
+      "type": "app",
+      "default-channel": "latest/stable",
+      "presence": "required",
+      "modes": [
+        "run",
+        "boot"
+      ]
+    }
+  ],
+  "timestamp": "2026-03-14"
+}

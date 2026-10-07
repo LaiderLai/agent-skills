@@ -1,0 +1,33 @@
+{
+  "type": "model",
+  "series": "16",
+  "authority-id": "acme-robotics",
+  "brand-id": "acme-robotics",
+  "model": "acme-rover-v3",
+  "architecture": "arm64",
+  "base": "core24",
+  "grade": "signed",
+  "snaps": [
+    {
+      "name": "pi",
+      "type": "gadget",
+      "default-channel": "24/stable"
+    },
+    {
+      "name": "pi-kernel",
+      "type": "kernel",
+      "default-channel": "24/stable"
+    },
+    {
+      "name": "core24",
+      "type": "base",
+      "default-channel": "latest/stable"
+    },
+    {
+      "name": "snapd",
+      "type": "snapd",
+      "default-channel": "latest/stable"
+    }
+  ],
+  "timestamp": "2026-09-30T12:00:00+00:00"
+}

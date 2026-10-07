@@ -1,0 +1,60 @@
+{
+  "skill_name": "validation-model-assertion",
+  "evals": [
+    {
+      "id": 0,
+      "name": "broken-uc24-mixed-errors",
+      "prompt": "snap sign keeps rejecting my model and i cant work out why, the error just says something about header values being strings. file is acme-rover-broken.json. we're building a core24 image for an x86 industrial box. can you figure out whats wrong and fix it?",
+      "files": [
+        "evals/files/acme-rover-broken.json"
+      ],
+      "expected_output": "Identifies the JSON-type errors (series as int, classic as bool) as the cause of the reported message, plus the errors snap sign would NOT report: architecture x86_64 is not a snap architecture, the kernel is on track 22 while the base is core24, core22 is listed instead of core24, presence on the gadget, the invalid mode 'boot', and that rover-control does not exist in the store. Produces a corrected JSON.",
+      "assertions": [
+        "Identifies that the timestamp is not RFC3339 (missing time/offset) and gives a corrected value",
+        "Identifies at least one non-string header value (e.g. series or classic given as a number/boolean) as the cause of the sign failure",
+        "Identifies the invalid architecture value and states the correct one (amd64)",
+        "Produces a corrected model JSON that actually passes snap sign or an equivalent structural check",
+        "Asks the user to confirm at least one judgement call (architecture, brand-id, model name, store, or grade) rather than silently assuming",
+        "Does not run an interactive command that blocks on a TTY (e.g. bare `snap create-key`)",
+        "Ends with a plain-English description of what the model builds (brand, release, architecture, grade, boot chain)"
+      ]
+    },
+    {
+      "id": 1,
+      "name": "legacy-uc18-review",
+      "prompt": "inherited this model from a colleague who left - evals/files/acme-rover-legacy.json. we want to know if its still valid before we rebuild the fleet images. also is this the old or new style model format?",
+      "files": [
+        "evals/files/acme-rover-legacy.json"
+      ],
+      "expected_output": "Identifies the model as the end-of-life UC16/18 format, explains that Ubuntu Core 18 is out of support, and gives a concrete migration path to a UC20+ model on a supported base rather than patching the old format.",
+      "assertions": [
+        "Identifies the model as the legacy pre-UC20 format (gadget/kernel/required-snaps headers rather than a snaps list)",
+        "States that Ubuntu Core 16/18 is end-of-life and recommends migrating rather than only patching the existing file",
+        "Names a supported base to migrate to (core20, core22, core24 or core26)",
+        "Explains that the migrated model needs an extended snaps list with name/type/default-channel, and ids once the grade is signed",
+        "Includes all four essential snaps (gadget, kernel, base, snapd) in any migrated model it produces",
+        "Resolves real snap-ids from the store for the snaps it can see, rather than inventing placeholders",
+        "Asks the user about judgement calls (architecture, brand-id, model name, or grade) instead of assuming",
+        "Ends with a plain-English description of what the model builds"
+      ]
+    },
+    {
+      "id": 2,
+      "name": "dangerous-to-signed-promotion",
+      "prompt": "we're moving our raspberry pi model from dangerous to signed grade for the production run. i already changed grade to signed in evals/files/acme-rover-promote.json but im not sure what else needs to change. whats missing?",
+      "files": [
+        "evals/files/acme-rover-promote.json"
+      ],
+      "expected_output": "Identifies that every snap now needs a snap-id at signed grade, supplies the real snap-ids for pi, pi-kernel, core24 and snapd from the store, and explains what signed grade buys (secure boot / FDE, no unasserted snaps). Produces the completed JSON.",
+      "assertions": [
+        "States that signed grade requires an `id` for every snap and supplies or asks for the missing snap-ids",
+        "Resolves at least one snap-id from the store rather than inventing a placeholder",
+        "For any snap it cannot resolve, asks the user for the snap-id instead of guessing or declaring the snap nonexistent",
+        "Checks the pinned channels against the base release and flags any mismatch",
+        "Asks the user to confirm the grade change is intended",
+        "Updates the timestamp to the current time",
+        "Ends with a plain-English description of what the model builds"
+      ]
+    }
+  ]
+}
