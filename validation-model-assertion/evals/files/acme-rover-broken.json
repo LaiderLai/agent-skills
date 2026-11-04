@@ -35,8 +35,7 @@
       "default-channel": "latest/stable",
       "presence": "required",
       "modes": [
-        "run",
-        "boot"
+        "run"
       ]
     }
   ],

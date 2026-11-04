@@ -75,6 +75,9 @@ cannot specify a grade for model without the extended snaps header
 | `store` | no | brand store id |
 | `serial-authority` | no | list of account ids allowed to sign serials, commonly `["generic"]` |
 | `system-user-authority` | no | list of account ids, or `"*"` |
+| `storage-safety` | no | `prefer-unencrypted` \| `prefer-encrypted` \| `encrypted`, at any grade. Only `encrypted` is allowed at grade `secured` |
+| `validation-sets` | no | list of `{account-id, name, sequence, mode}`; `mode` is `enforce` \| `prefer-enforce`. Pinning `sequence` fixes it for the device's lifetime. **Not checked by the validator** |
+| `display-name` | no | descriptive string |
 | `timestamp` | yes | RFC3339, e.g. `"2026-10-07T00:00:00+00:00"` — a bare date is rejected |
 | `sign-key-sha3-384` | never write it | snapd fills it in when signing |
 
@@ -208,7 +211,8 @@ Each entry is a map of strings:
 | `type` | yes | `app`, `base`, `gadget`, `kernel`, `snapd`, `core` |
 | `default-channel` | no (defaults `latest/stable`) | `track/risk`, e.g. `24/stable` |
 | `presence` | no | `required` \| `optional`. **Not allowed on essential snaps** (snapd, kernel, gadget, base) |
-| `modes` | no | subset of `run`, `ephemeral`, `recover`, `factory-reset` — snapd does **not** validate the values |
+| `modes` | no | list of modes the snap is installed in, default `["run"]` |
+| `components` | no | map of bare component name (not `snap+component`) → `"required"` \| `"optional"`, or `{presence, modes}`; `presence` is mandatory and modes must be a subset of the snap's |
 
 Structural rules snapd enforces:
 
@@ -295,16 +299,28 @@ document is not a source of truth. One `--online` run checks all of them.
 `core26` is current, alongside `core20`/`core22`/`core24`. The convention is
 that `coreNN` pairs with the `NN` track of the kernel and gadget:
 
-| base | kernel/gadget track | notes |
+| base | kernel/gadget track | documented variants |
 |---|---|---|
-| `core20` | `20/stable` | |
-| `core22` | `22/stable` | `22-hwe`, `22-rt`, `22-oem` variants exist |
-| `core24` | `24/stable` | `24-hwe`, `24-rt`, `24.10` variants exist |
-| `core26` | `26/stable` | `26-rt`, `26.04`, `26.10` variants exist |
+| `core20` | `20/<risk>` | |
+| `core22` | `22/<risk>` | `22-hwe`, `22-rt`, `22-oem` |
+| `core24` | `24/<risk>` | `24-hwe`, `24-rt`, `24.10`, `classic-24.04` |
+| `core26` | `26/<risk>` | `26-rt`, `26.04`, `26.10` |
+
+How the validator judges a track name:
+
+| Track | Result |
+|---|---|
+| `latest` or a release number (`22`, `24`, `26`) | fine |
+| documented variant: `N-hwe`, `N-rt`, `N-oem`, `N.MM`, `classic-N.MM` | **warning** — legal, but confirm it is deliberate |
+| anything else (`2b`, `lastest`, `24-foo`) | **error** — signs, but it is a typo |
+
+A well-formed track with nothing published (`28/stable`) is a separate
+warning: the track may simply not exist yet.
 
 The validator derives the expected track from the base number, so a new
-`coreNN` works without any change to the tooling. A mismatch is reported as a
-**confirm**, not an error, because hwe/rt/vendor tracks are legitimate.
+`coreNN` works without any change to the tooling. A kernel/gadget on a
+different release number than the base (a `core26` model on `24/stable`) is
+a **confirm**: usually a leftover from the previous release.
 
 ### How the store resolves a channel
 
@@ -332,9 +348,16 @@ Two consequences when checking a model:
   it resolves to `26/stable`. Flagging it as an error is wrong. It is still
   worth mentioning, because the image will not contain what the channel name
   implies — somebody pinned `edge` expecting fresh builds and will get stable.
-- `26/edge` is **broken** when the track `26` does not exist at all, or when the
-  track exists with nothing more stable than the requested risk. That is a real
-  build failure.
+- `26/edge` **cannot be built yet** when the track `26` does not exist at all,
+  or when the track exists with nothing more stable than the requested risk.
+  The build fails, but the validator reports it as a warning: in a staged
+  workflow the assertion is often written before the release exists.
+- `26/stble` is **wrong**, not early: the risk must be one of `stable`,
+  `candidate`, `beta`, `edge`. snapd rejects it at signing
+  (`invalid risk in channel name`), and so does the validator.
+- `2b/stable` is **wrong** too: snapd signs it, but a track must be `latest`,
+  a release number, or a documented variant (`24-hwe`, `26-rt`, `26.04`, …),
+  so the validator reports an error before the store is ever asked.
 
 ---
 
@@ -342,9 +365,9 @@ Two consequences when checking a model:
 
 | Grade | Meaning | Use when |
 |---|---|---|
-| `dangerous` | no snap-ids needed, unasserted (`--snap local.snap`) snaps allowed, no secure boot chain, no full-disk encryption | bring-up and local iteration |
+| `dangerous` | no snap-ids needed, unasserted (`--snap local.snap`) and devmode snaps allowed; weakens security, but disk encryption is still available | bring-up and local iteration |
 | `signed` | every snap must be asserted and identified by snap-id; secure boot + FDE available | the normal production choice |
-| `secured` | as `signed`, plus recovery modes are restricted — no ephemeral/recover shell escape | devices where physical access is part of the threat model |
+| `secured` | as `signed`, plus full-disk encryption and secure boot are mandatory. `storage-safety` may only be `encrypted` (snapd rejects anything else: `secured grade model must not have storage-safety overridden`) | devices where physical access is part of the threat model |
 
 Going from `dangerous` to `signed` is where most models break, because the
 missing snap-ids suddenly become errors. Validate before you flip the grade.
@@ -368,6 +391,10 @@ All observed from `snap sign` on snapd 2.77.1.
 | `essential snaps are always available, cannot specify presence for snap "pc"` | `presence` on gadget/kernel/base/snapd |
 | `"id" of snap "pc" is mandatory for signed grade model` | missing snap-id at signed/secured grade |
 | `"id" of snap "pc" contains invalid characters` | snap-id is not 32 valid characters |
+| `invalid default channel for snap "pc-kernel": invalid risk in channel name: 24/stble` | risk is not stable/candidate/beta/edge — a typo |
+| `invalid component name pc-kernel+foo` | component key written as `snap+component`; use the bare name |
+| `"presence" of component "foo" of snap "pc-kernel" is mandatory` | component map form without `presence` |
+| `mode "recover" of component "foo" of snap "pc-kernel" is incompatible with the snap modes` | component modes outside the snap's modes |
 | `"distribution" header is mandatory, see distribution ID in os-release spec` | `classic: "true"` with no distribution |
 | `cannot specify distribution for model unless it is classic and has an extended snaps header` | distribution without classic |
 | `"classic" header must be 'true' or 'false'` | `"classic": "yes"` |
@@ -388,11 +415,13 @@ sign successfully and fail later:
   `riscv64` are real.
 - **A valid-looking but wrong snap-id** — any 32 alphanumeric characters pass.
   A snap-id copied from the wrong snap builds an image with the wrong kernel.
-- **A channel that does not exist** — `99/stable` signs fine.
+- **A channel that does not exist** — `99/stable` signs fine. The validator
+  reports it (and an empty risk, or no build for the architecture) as a
+  warning: the release may simply not have happened yet. A misspelt risk
+  (`99/stble`) is different: snapd rejects it, and the validator reports an
+  error.
 - **A channel with no build for this architecture** — e.g. an arm64-only
   gadget track in an amd64 model.
-- **Unknown `modes` values** — `"modes": ["run", "bogus"]` signs fine; the snap
-  is then simply never installed.
 - **kernel/gadget track vs base coherence** — a `core24` model with a
   `22/stable` kernel signs fine and usually boots into a mess.
 
@@ -455,6 +484,9 @@ the model does not silently change meaning when the grade is promoted to
 `signed` for production.
 
 ### Classic hybrid 24.04
+
+The gadget's `classic-24.04` track is a documented variant: the validator
+reports it as a warning to confirm, not an error.
 
 ```json
 {
@@ -527,7 +559,7 @@ machine is offline — it does not affect the assertion.
 6. **Editing a signed `.model`.** The signature covers the headers; any edit
    invalidates it. Convert back to JSON, edit, re-sign.
 7. **Track drift.** A `core24` base with a `22/stable` kernel is legal and
-   wrong. Pin the track that matches the base unless you deliberately want an
-   hwe or vendor track.
+   wrong. Pin the track that matches the base; variants such as `24-hwe` are
+   reported as warnings so a deliberate choice is still visible.
 8. **`snap known --remote` exits 0 with no output** when the model does not
    exist, which silently produces an empty file.

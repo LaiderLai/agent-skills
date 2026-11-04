@@ -8,7 +8,7 @@
       "files": [
         "evals/files/acme-rover-broken.json"
       ],
-      "expected_output": "Identifies the JSON-type errors (series as int, classic as bool) as the cause of the reported message, plus the errors snap sign would NOT report: architecture x86_64 is not a snap architecture, the kernel is on track 22 while the base is core24, core22 is listed instead of core24, presence on the gadget, the invalid mode 'boot', and that rover-control does not exist in the store. Produces a corrected JSON.",
+      "expected_output": "Identifies the JSON-type errors (series as int, classic as bool) as the cause of the reported message, plus the errors snap sign would NOT report: architecture x86_64 is not a snap architecture, the kernel is on track 22 while the base is core24, core22 is listed instead of core24, presence on the gadget, and that rover-control does not exist in the store. Produces a corrected JSON.",
       "assertions": [
         "Identifies that the timestamp is not RFC3339 (missing time/offset) and gives a corrected value",
         "Identifies at least one non-string header value (e.g. series or classic given as a number/boolean) as the cause of the sign failure",

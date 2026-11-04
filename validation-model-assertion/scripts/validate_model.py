@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import difflib
 import json
 import os
 import re
@@ -43,7 +44,12 @@ ARCHITECTURES = {"amd64", "arm64", "armhf", "i386", "ppc64el", "s390x", "riscv64
 GRADES = {"dangerous", "signed", "secured"}
 SNAP_TYPES = {"app", "base", "gadget", "kernel", "snapd", "core"}
 PRESENCE = {"required", "optional"}
-MODES = {"run", "ephemeral", "recover", "factory-reset"}
+STORAGE_SAFETY = {"prefer-unencrypted", "prefer-encrypted", "encrypted"}
+
+# Project convention: one file per (grade, stage), named <grade>-<stage>.json.
+# Each stage pins every snap to one risk.
+STAGE_RISK = {"edge": "edge", "next": "beta", "stable": "stable"}
+STAGE_FILE_RE = re.compile(r"^(dangerous|signed|secured)-(edge|next|stable)\.json$")
 
 # UC20+ bases are core20, core22, core24, core26, ... - the track is derived
 # from the number, see base_track(). These two belong to end-of-life releases.
@@ -70,6 +76,23 @@ def base_track(base: str | None) -> str | None:
 # Ordered most stable first. The store resolves a risk with no release of its
 # own by walking towards stable, never away from it.
 RISKS = ["stable", "candidate", "beta", "edge"]
+
+# Tracks are "latest" or the Ubuntu Core release number (22, 24, 26, ...).
+# Anything else is a typo rather than a track that has yet to be created.
+TRACK_RE = re.compile(r"^(latest|\d+)$")
+# Documented variants of a release track: hwe/rt/oem kernels, point releases
+# (26.04) and classic gadget tracks (classic-24.04). Legal, but worth a look.
+VARIANT_TRACK_RE = re.compile(r"^(\d+-(hwe|rt|oem)|\d+\.\d{2}|classic-\d+\.\d{2})$")
+
+
+def channel_name_ok(channel: str) -> bool:
+    track, risk = split_channel(channel)
+    return risk in RISKS and bool(TRACK_RE.match(track) or VARIANT_TRACK_RE.match(track))
+
+
+# A channel with nothing published yet is where development has not reached,
+# not a mistake in the model: the assertion can be written ahead of the release.
+UNPUBLISHED = "Not published yet — the image build will fail until it is"
 
 
 def split_channel(channel: str) -> tuple[str, str]:
@@ -185,7 +208,7 @@ def store_info(name: str, store_id: str | None = None) -> dict | None:
     key = (name, store_id)
     if key in _STORE_CACHE:
         return _STORE_CACHE[key]
-    url = STORE_INFO.format(name=name) + "?fields=snap-id,name,type,base,architectures,revision,version"
+    url = STORE_INFO.format(name=name) + "?fields=snap-id,name,type,base,architectures,revision,version,resources"
     headers = dict(STORE_HEADERS)
     if store_id:
         # Switches the lookup into a brand store's namespace. Snaps that are
@@ -410,20 +433,31 @@ def check_uc20(model: dict, rep: Report, variant: str) -> list[dict]:
         rep.error("grade", f'must be one of {"|".join(sorted(GRADES))}, not {grade!r}')
     elif grade == "dangerous":
         rep.confirm("grade", "development image? dangerous allows unasserted snaps",
-                    "dangerous disables secure boot and full-disk encryption and allows "
-                    "unasserted snaps; it is the right choice for bring-up and the wrong "
-                    "one for anything that ships", "dangerous")
+                    "dangerous relaxes constraints (snap-ids optional, unasserted and devmode "
+                    "snaps allowed) and weakens security; disk encryption is still available. "
+                    "It is the right choice for bring-up and the wrong one for anything that "
+                    "ships", "dangerous")
     else:
         if grade == "secured":
-            rep.confirm("grade", "recovery modes locked down, every snap must be asserted",
-                        "pick secured only if physical access to the device is part of your "
-                        "threat model; it also rules out recovery-mode debugging in the field",
-                        "secured")
+            rep.confirm("grade", "full-disk encryption and secure boot mandatory, every snap must be asserted",
+                        "pick secured only if the target hardware supports both; a device "
+                        "that cannot encrypt will fail to install", "secured")
         else:
             rep.confirm("grade", "store-asserted snaps only, every snap needs a snap-id",
                         "right for production. If you are still bringing the board up, dangerous "
-                        "lets you sideload; if physical access is in your threat model, secured "
-                        "additionally locks down recovery", "signed")
+                        "lets you sideload; secured additionally makes full-disk encryption and "
+                        "secure boot mandatory", "signed")
+
+    if "storage-safety" in model:
+        safety = model.get("storage-safety")
+        if safety not in STORAGE_SAFETY:
+            rep.error("storage-safety",
+                      f"must be one of {'|'.join(sorted(STORAGE_SAFETY))}, not {safety!r}")
+        elif grade == "secured" and safety != "encrypted":
+            rep.error("storage-safety",
+                      f'secured grade model must not have storage-safety overridden, only "encrypted" '
+                      f"is valid (got {safety!r})",
+                      'set "encrypted" or remove the header')
 
     base = model.get("base")
     if not base:
@@ -505,14 +539,10 @@ def check_uc20(model: dict, rep: Report, variant: str) -> list[dict]:
         if modes is not None:
             if not isinstance(modes, list):
                 rep.error(where, '"modes" must be a list')
-            else:
-                bad = set(modes) - MODES
-                if bad:
-                    rep.error(where, f"unknown modes {sorted(bad)} — snapd signs these without "
-                                     "complaint but the snap will never be installed",
-                              "valid: " + ", ".join(sorted(MODES)))
             if presence is None:
                 rep.info(where, '"modes" without "presence" means required in those modes only')
+
+        check_components(snap, where, rep)
 
         channel = snap.get("default-channel")
         if channel is None:
@@ -522,6 +552,27 @@ def check_uc20(model: dict, rep: Report, variant: str) -> list[dict]:
                          f'set e.g. "{base_track(base) or "24"}/stable"')
         elif "/" in str(channel) and str(channel).count("/") > 2:
             rep.error(where, f"default-channel {channel!r} is malformed")
+        elif split_channel(str(channel))[1] not in RISKS:
+            # A risk that is not one of the four is a typo, not a release that
+            # has yet to happen — snapd's assembler rejects it outright.
+            bad = split_channel(str(channel))[1]
+            close = difflib.get_close_matches(bad, RISKS, n=1)
+            rep.error(where, f"invalid risk in channel name: {channel!r} — {bad!r} is not one of "
+                             f"{', '.join(RISKS)}",
+                      f'did you mean "{str(channel).replace(bad, close[0], 1)}"?' if close else
+                      "use <track>/<stable|candidate|beta|edge>")
+        elif VARIANT_TRACK_RE.match(split_channel(str(channel))[0]):
+            rep.warn(where, f"variant track in {channel!r} — not the plain release track",
+                     f'deliberate hwe/rt/oem, point-release or classic track? Otherwise use '
+                     f'"{base_track(base) or "26"}/{split_channel(str(channel))[1]}"')
+        elif not TRACK_RE.match(split_channel(str(channel))[0]):
+            bad = split_channel(str(channel))[0]
+            rep.add("ERROR", where,
+                    f"invalid track in channel name: {channel!r} — {bad!r} is not \"latest\", "
+                    "an Ubuntu Core release number, or a documented variant "
+                    "(N-hwe, N-rt, N-oem, N.MM, classic-N.MM)",
+                    f'use "latest" or the release number, e.g. "{base_track(base) or "26"}/'
+                    f'{split_channel(str(channel))[1]}"', "build")
 
     # The four essential snaps. snap sign only enforces kernel and gadget, but a
     # model that leaves base or snapd implicit is not reproducible: the image
@@ -572,11 +623,92 @@ def check_uc20(model: dict, rep: Report, variant: str) -> list[dict]:
                 rep.confirm(
                     f'snaps "{snap.get("name")}"',
                     f"does not match base {base} (expected {expected}/*) — deliberate?",
-                    "hwe, rt and vendor tracks are real reasons to do this; a leftover "
-                    "track from the previous release is the more common one",
+                    "usually a track left over from the previous release",
                     str(track),
                 )
     return [s for s in snaps if isinstance(s, dict)]
+
+
+def check_components(snap: dict, where: str, rep: Report) -> None:
+    """Components are a map of bare component name -> presence, where presence
+    is "required"/"optional" or {"presence": ..., "modes": [...]}. snap sign
+    rejects a bad name, but only when a key is available, so check it here."""
+    comps = snap.get("components")
+    if comps is None:
+        return
+    if not isinstance(comps, dict) or not comps:
+        rep.error(where, '"components" must be a non-empty map of component name to presence')
+        return
+    snap_modes = snap.get("modes") if isinstance(snap.get("modes"), list) else ["run"]
+    for cname, cval in comps.items():
+        cwhere = f'{where} component "{cname}"'
+        if "+" in cname:
+            bare = cname.split("+", 1)[1]
+            rep.error(cwhere, f"invalid component name {cname!r} — list the bare component name, "
+                              "not <snap>+<component>",
+                      f'use "{bare}"')
+        elif not NAME_RE.match(cname):
+            rep.error(cwhere, f"invalid component name {cname!r}")
+
+        if isinstance(cval, str):
+            presence, cmodes = cval, None
+        elif isinstance(cval, dict):
+            presence, cmodes = cval.get("presence"), cval.get("modes")
+        else:
+            rep.error(cwhere, 'must be "required", "optional" or a map with "presence"')
+            continue
+        if presence is None:
+            rep.error(cwhere, '"presence" is mandatory', 'set "required" or "optional"')
+        elif presence not in PRESENCE:
+            rep.error(cwhere, f'presence must be required|optional, not {presence!r}')
+        if cmodes is not None:
+            if not isinstance(cmodes, list):
+                rep.error(cwhere, '"modes" must be a list')
+            else:
+                extra = [m for m in cmodes if m not in snap_modes]
+                if extra:
+                    rep.error(cwhere, f"component modes {extra} are not among the snap's modes "
+                                      f"{snap_modes}",
+                              "component modes must be a subset of the snap's modes")
+
+
+def parse_stage_name(path: str) -> tuple[str, str] | None:
+    """(grade, stage) for a file following the <grade>-<stage>.json convention."""
+    match = STAGE_FILE_RE.match(os.path.basename(path))
+    return (match.group(1), match.group(2)) if match else None
+
+
+def check_stage(model: dict, path: str, rep: Report) -> None:
+    """A file named for a grade and stage must say that grade and use that
+    stage's risk on every snap — a mismatch is almost always a copy-paste
+    from a sibling variant."""
+    parsed = parse_stage_name(path)
+    if parsed is None:
+        return
+    grade, stage = parsed
+    risk = STAGE_RISK[stage]
+    if model.get("grade") != grade:
+        rep.add("ERROR", "grade", f"file is named for grade {grade!r} but the model says "
+                           f"{model.get('grade')!r}",
+                  f'set "grade": "{grade}", or rename the file', "convention")
+    snaps = model.get("snaps")
+    if not isinstance(snaps, list):
+        return
+    for snap in snaps:
+        if not isinstance(snap, dict) or not snap.get("name"):
+            continue
+        where = f'snaps "{snap["name"]}"'
+        channel = snap.get("default-channel")
+        if channel is None:
+            rep.add("ERROR", where, f'no "default-channel"; stage {stage!r} expects risk {risk!r} '
+                                    "(the default latest/stable does not match)",
+                    f'set "default-channel": "<track>/{risk}"', "convention")
+            continue
+        actual = split_channel(str(channel))[1]
+        if actual in RISKS and actual != risk:
+            rep.add("ERROR", where, f"channel {channel!r} uses risk {actual!r}, but stage {stage!r} "
+                                    f"expects {risk!r}",
+                    f"use <track>/{risk}", "convention")
 
 
 def reject_legacy(model: dict, rep: Report) -> list[dict]:
@@ -697,6 +829,10 @@ def check_store(entries: list[dict], model: dict, rep: Report, store_id: str | N
 
         channel = snap.get("default-channel")
         channel_map = info.get("channel-map") or []
+        if channel and not channel_name_ok(str(channel)):
+            # Already an error from the structural layer; asking the store
+            # about a misspelt name would only add a misleading "not published".
+            channel = None
         if channel and channel_map:
             track, risk = split_channel(str(channel))
             available = _tracks_by_risk(channel_map, None)
@@ -744,24 +880,64 @@ def check_store(entries: list[dict], model: dict, rep: Report, store_id: str | N
                                f"{model.get('base')}")
                     else:
                         fix = f"published tracks{scope}: {listing}"
-                    rep.build_error(where, f"track {track!r} does not exist for this snap{scope}",
-                                    fix)
+                    rep.warn(where, f"track {track!r} does not exist for this snap{scope}",
+                             f"{fix}. {UNPUBLISHED}")
                 else:
-                    rep.build_error(where,
-                              f"channel {channel!r} has no release and nothing more stable "
-                              f"to fall back to",
-                              f"published risks on track {track!r}{scope}: "
-                              f"{', '.join(sorted(table[track]))}")
+                    rep.warn(where,
+                             f"channel {channel!r} has no release and nothing more stable "
+                             f"to fall back to",
+                             f"published risks on track {track!r}{scope}: "
+                             f"{', '.join(sorted(table[track]))}. {UNPUBLISHED}")
             elif check_arch and resolve(arch_only) is None:
-                rep.build_error(where, f"channel {channel!r} has no {arch} build",
-                          f"published tracks for {arch}: "
-                          f"{describe_tracks(channel_map, arch)}")
+                rep.warn(where, f"channel {channel!r} has no {arch} build",
+                         f"published tracks for {arch}: "
+                         f"{describe_tracks(channel_map, arch)}. {UNPUBLISHED}")
             elif served != f"{track}/{risk}":
                 rep.info(where,
                          f"{channel!r} has no release of its own; the store serves "
                          f"{served!r} instead",
                          "that is normal store behaviour, but the image will not contain "
                          "what the channel name suggests")
+
+            arch_served = resolve(arch_only) if check_arch else served
+            if served is not None and arch_served is not None:
+                check_published_components(snap, arch_served, channel_map,
+                                           arch if check_arch else None, rep)
+
+
+def check_published_components(snap: dict, served: str, channel_map: list,
+                               arch: str | None, rep: Report) -> None:
+    """Compare the model's components with what the store publishes on the
+    channel the image will actually use. Missing is a warning, like an
+    unpublished channel: the component may simply not be released there yet."""
+    comps = snap.get("components")
+    if not isinstance(comps, dict):
+        return
+    track, risk = served.split("/", 1)
+    published: set[str] = set()
+    for entry in channel_map:
+        ch = entry.get("channel") or {}
+        if ch.get("track") == track and ch.get("risk") == risk and \
+                (arch is None or ch.get("architecture") in (arch, None)):
+            published |= {r.get("name") for r in entry.get("resources") or []}
+    name = snap.get("name")
+    for cname, cval in comps.items():
+        if "+" in cname:
+            continue  # already an error from the structural layer
+        presence = cval.get("presence") if isinstance(cval, dict) else cval
+        label = f"{name}+{cname}"
+        if cname in published:
+            rep.looked_up(label, "component published", served)
+            continue
+        rep.looked_up(label, "component NOT PUBLISHED", served)
+        where = f'snaps "{name}" component "{cname}"'
+        if presence == "optional":
+            rep.info(where, f"optional component {cname!r} is not published on {served}",
+                     "ubuntu-image leaves it out unless it is requested explicitly")
+        else:
+            rep.warn(where, f"required component {cname!r} is not published on {served}",
+                     f"published there: {', '.join(sorted(published)) or 'none'}. "
+                     f"{UNPUBLISHED}")
 
 
 def ensure_key(name: str = "model-validation-throwaway") -> str | None:
@@ -913,15 +1089,44 @@ def check_sign(path: str, key: str | None, rep: Report) -> None:
 
 
 GRADE_MEANING = {
-    "dangerous": "unasserted snaps allowed, no secure boot, no disk encryption — development only",
+    "dangerous": "snap-ids optional, unasserted and devmode snaps allowed; disk encryption "
+                 "still available — development only",
     "signed": "store-asserted snaps only; the model permits secure boot and full-disk "
               "encryption, though whether the device gets them also depends on the "
               "gadget, kernel and platform",
-    "secured": "as signed, plus recovery modes are locked down",
+    "secured": "as signed, plus full-disk encryption and secure boot are mandatory",
+}
+
+STORAGE_SAFETY_MEANING = {
+    "prefer-unencrypted": "do not encrypt, even if the hardware supports it",
+    "prefer-encrypted": "encrypt if the hardware supports it",
+    "encrypted": "encryption required — installation fails on hardware that cannot encrypt",
 }
 
 
-def summarize(model: dict, variant: str, brand_display: str | None = None) -> str:
+SUMMARY_CLOSING = ("If any line above is not what you meant, the model is wrong regardless of "
+                   "what the checks say — they can only tell you it is well-formed, not that "
+                   "it describes your product.")
+
+
+def describe_components(snap: dict, indent: int) -> list[str]:
+    comps = snap.get("components")
+    if not isinstance(comps, dict):
+        return []
+    out = []
+    for cname, cval in comps.items():
+        if isinstance(cval, dict):
+            bits = [str(cval.get("presence", "?"))]
+            if cval.get("modes"):
+                bits.append("modes: " + ", ".join(map(str, cval["modes"])))
+        else:
+            bits = [str(cval)]
+        out.append(f"{' ' * indent}+ component {cname} ({', '.join(bits)})")
+    return out
+
+
+def summarize(model: dict, variant: str, brand_display: str | None = None,
+              heading: str = "## What this model actually says", closing: bool = True) -> str:
     """Say what the model means in prose.
 
     A model can be perfectly valid and still describe the wrong device. The
@@ -943,7 +1148,7 @@ def summarize(model: dict, variant: str, brand_display: str | None = None) -> st
         release = base_track(base)
         system = f"Ubuntu Core {release}" if release else f"Ubuntu Core (base {base})"
 
-    lines = ["## What this model actually says", ""]
+    lines = [heading, ""]
     lines.append(f'{who} ships a device model called "{name}", running {system} on {arch}.')
     if variant == "legacy-eol":
         lines.append("That release is end-of-life and the format predates grade, presence "
@@ -953,6 +1158,10 @@ def summarize(model: dict, variant: str, brand_display: str | None = None) -> st
     grade = model.get("grade")
     if grade:
         lines.append(f'Security grade **{grade}** — {GRADE_MEANING.get(grade, "")}.')
+        lines.append("")
+    safety = model.get("storage-safety")
+    if safety:
+        lines.append(f'Storage safety **{safety}** — {STORAGE_SAFETY_MEANING.get(safety, "not a valid value")}.')
         lines.append("")
 
     snaps = model.get("snaps")
@@ -965,7 +1174,7 @@ def summarize(model: dict, variant: str, brand_display: str | None = None) -> st
             row = (snap.get("type", "?"), snap.get("name", "?"),
                    snap.get("default-channel", "latest/stable"))
             if row[0] in {"kernel", "gadget", "base", "snapd", "core"}:
-                by_type.setdefault("base" if row[0] == "core" else row[0], row)
+                by_type.setdefault("base" if row[0] == "core" else row[0], (row, snap))
             else:
                 extra.append((row, snap))
         # Fixed boot order, so a missing essential snap is a visible gap rather
@@ -974,9 +1183,11 @@ def summarize(model: dict, variant: str, brand_display: str | None = None) -> st
                 ["gadget", "kernel", "base", "snapd"]
         lines.append("Boot chain:")
         for kind in order:
-            row = by_type.get(kind)
-            if row:
+            entry = by_type.get(kind)
+            if entry:
+                row, snap = entry
                 lines.append(f"  {kind:<7} {row[1]:<16} {row[2]}")
+                lines.extend(describe_components(snap, indent=10))
             else:
                 lines.append(f"  {kind:<7} -- not pinned by this model --")
         lines.append("")
@@ -987,6 +1198,7 @@ def summarize(model: dict, variant: str, brand_display: str | None = None) -> st
                 if snap.get("modes"):
                     bits.append("modes: " + ", ".join(snap["modes"]))
                 lines.append(f"  {n:<16} ({', '.join(bits)})")
+                lines.extend(describe_components(snap, indent=4))
             lines.append("")
     else:
         gadget, kernel = model.get("gadget"), model.get("kernel")
@@ -1006,10 +1218,9 @@ def summarize(model: dict, variant: str, brand_display: str | None = None) -> st
     if sysuser:
         lines.append(f"system-user assertions accepted from: "
                      f"{', '.join(sysuser) if isinstance(sysuser, list) else sysuser}.")
-    lines.append("")
-    lines.append("If any line above is not what you meant, the model is wrong regardless of "
-                 "what the checks say — they can only tell you it is well-formed, not that "
-                 "it describes your product.")
+    if closing:
+        lines.append("")
+        lines.append(SUMMARY_CLOSING)
     return "\n".join(lines)
 
 
@@ -1023,6 +1234,7 @@ def compute_verdict(rep: Report, variant: str, online: bool) -> str:
     """
     sign_errors = [f for f in rep.errors if f.get("stage", "sign") == "sign"]
     build_errors = [f for f in rep.errors if f.get("stage") == "build"]
+    convention_errors = [f for f in rep.errors if f.get("stage") == "convention"]
     if variant == "legacy-eol":
         return "FAIL — end-of-life model format, migrate it rather than fix it"
     if sign_errors and build_errors:
@@ -1036,11 +1248,51 @@ def compute_verdict(rep: Report, variant: str, online: bool) -> str:
         # more than the evidence supports.
         return ("FAIL — signs cleanly, but the image build cannot resolve what "
                 "this model asks for")
+    if convention_errors:
+        return ("FAIL — signs and builds, but does not match its "
+                "<grade>-<stage>.json name")
     if not online:
         return "PASS (offline — structure only, nothing checked against the store)"
     if rep.warnings:
         return "PASS with warnings"
     return "PASS"
+
+
+def render_ledger(rep: Report, online: bool, scope: str = "") -> list[str]:
+    lines: list[str] = []
+    suffix = f" — {scope}" if scope else ""
+    if rep.lookups:
+        snaps = [x for x in rep.lookups if not x[1].startswith("component")]
+        comps = [x for x in rep.lookups if x[1].startswith("component")]
+        verified = [n for n, s, _ in snaps if s == "snap-id verified"]
+        unchecked = [n for n, s, _ in rep.lookups if s in {"NOT FOUND", "unchecked"}]
+        no_id = [n for n, s, _ in rep.lookups if s == "no id declared"]
+        counts = f"{len(verified)} of {len(snaps)} snap-ids verified against the store"
+        if comps:
+            published = [n for n, s, _ in comps if s == "component published"]
+            counts += f"; {len(published)} of {len(comps)} components published"
+        lines.append(f"## Store lookups ({counts}){suffix}")
+        width = max(len(n) for n, _, _ in rep.lookups)
+        for name, status, detail in rep.lookups:
+            lines.append(f"  {name:<{width}}  {status}" + (f" — {detail}" if detail else ""))
+        if unchecked:
+            lines.append("")
+            lines.append(f"Could not check: {', '.join(unchecked)}. These are the snaps only "
+                         "you can vouch for — a wrong snap-id signs cleanly and fails at the "
+                         "device, so do not let them pass silently.")
+        if no_id:
+            lines.append("")
+            lines.append(f"No snap-id declared for: {', '.join(no_id)} — pinned by name only, "
+                         "so the model does not constrain which publisher's snap is used.")
+        lines.append("")
+    elif not online:
+        lines.append(f"## Store lookups{suffix}")
+        lines.append("  none — this ran offline, so no snap-id, type, channel or "
+                     "architecture claim in this model has been checked against reality.")
+        lines.append("  Re-run with --online (and --store <id> for a brand store) "
+                     "before trusting a PASS.")
+        lines.append("")
+    return lines
 
 
 def render(rep: Report, path: str, variant: str, online: bool = False) -> str:
@@ -1076,32 +1328,7 @@ def render(rep: Report, path: str, variant: str, online: bool = False) -> str:
     emit(("ERROR", "WARN"))
 
     # Say what was checked, not just what was wrong.
-    if rep.lookups:
-        verified = [n for n, s, _ in rep.lookups if s == "snap-id verified"]
-        unchecked = [n for n, s, _ in rep.lookups if s in {"NOT FOUND", "unchecked"}]
-        no_id = [n for n, s, _ in rep.lookups if s == "no id declared"]
-        lines.append(f"## Store lookups ({len(verified)} of {len(rep.lookups)} "
-                     f"snap-ids verified against the store)")
-        width = max(len(n) for n, _, _ in rep.lookups)
-        for name, status, detail in rep.lookups:
-            lines.append(f"  {name:<{width}}  {status}" + (f" — {detail}" if detail else ""))
-        if unchecked:
-            lines.append("")
-            lines.append(f"Could not check: {', '.join(unchecked)}. These are the snaps only "
-                         "you can vouch for — a wrong snap-id signs cleanly and fails at the "
-                         "device, so do not let them pass silently.")
-        if no_id:
-            lines.append("")
-            lines.append(f"No snap-id declared for: {', '.join(no_id)} — pinned by name only, "
-                         "so the model does not constrain which publisher's snap is used.")
-        lines.append("")
-    elif not online:
-        lines.append("## Store lookups")
-        lines.append("  none — this ran offline, so no snap-id, type, channel or "
-                     "architecture claim in this model has been checked against reality.")
-        lines.append("  Re-run with --online (and --store <id> for a brand store) "
-                     "before trusting a PASS.")
-        lines.append("")
+    lines.extend(render_ledger(rep, online))
 
     emit(("INFO",))
 
@@ -1207,6 +1434,7 @@ def validate_one(path: str, args) -> dict:
     check_common(model, rep)
     if variant in {"uc20+", "classic-hybrid"}:
         entries = check_uc20(model, rep, variant)
+        check_stage(model, path, rep)
     else:
         entries = reject_legacy(model, rep)
 
@@ -1265,15 +1493,14 @@ def check_assert_drift(result: dict) -> None:
         return
 
 
-def check_identity_collisions(results: list[dict]) -> list[str]:
-    """Find models that claim the same device identity.
+def is_stage_matrix(filenames: list[str]) -> bool:
+    """True when every file follows <grade>-<stage>.json and no (grade, stage)
+    cell appears twice — the project's reflash-only variant set."""
+    cells = [parse_stage_name(f) for f in filenames]
+    return all(cells) and len(set(cells)) == len(cells)
 
-    A model's primary key is series + brand-id + model, with `revision` as the
-    tiebreaker. Filenames mean nothing. Two files that differ only in grade or
-    channel are not two variants — they are two revision-0 assertions for one
-    identity, and a device can hold exactly one. This is invisible when you
-    validate files one at a time, which is exactly why it survives review.
-    """
+
+def _identity_groups(results: list[dict]) -> dict[tuple, list[tuple[str, str]]]:
     groups: dict[tuple, list[tuple[str, str]]] = {}
     for r in results:
         m = r["model"]
@@ -1284,10 +1511,38 @@ def check_identity_collisions(results: list[dict]) -> list[str]:
             continue
         groups.setdefault(key, []).append(
             (os.path.basename(r["path"]), str(m.get("revision", "0"))))
+    return groups
 
+
+def describe_stage_matrices(results: list[dict]) -> list[str]:
     lines: list[str] = []
-    for (series, brand, name), files in sorted(groups.items()):
-        if len(files) < 2:
+    for (series, brand, name), files in sorted(_identity_groups(results).items()):
+        if len(files) < 2 or not is_stage_matrix([f for f, _ in files]):
+            continue
+        lines.append(f"**{brand}/{name}** (series {series}) is shared by {len(files)} "
+                     f"stage × grade variants: {', '.join(sorted(f for f, _ in files))}.")
+        lines.append("")
+    if lines:
+        lines.append("This is expected for the <grade>-<stage>.json convention: each variant "
+                     "is flashed onto a device on its own, so sharing one identity is fine. "
+                     "Do not remodel between them — a remodel needs a higher `revision`, "
+                     "and these all carry the same one.")
+        lines.append("")
+    return lines
+
+
+def check_identity_collisions(results: list[dict]) -> list[str]:
+    """Find models that claim the same device identity.
+
+    A model's primary key is series + brand-id + model, with `revision` as the
+    tiebreaker. Filenames mean nothing. Two files that differ only in grade or
+    channel are not two variants — they are two revision-0 assertions for one
+    identity, and a device can hold exactly one. This is invisible when you
+    validate files one at a time, which is exactly why it survives review.
+    """
+    lines: list[str] = []
+    for (series, brand, name), files in sorted(_identity_groups(results).items()):
+        if len(files) < 2 or is_stage_matrix([f for f, _ in files]):
             continue
         revs = [rev for _, rev in files]
         dupes = {r for r in revs if revs.count(r) > 1}
@@ -1313,7 +1568,7 @@ def check_identity_collisions(results: list[dict]) -> list[str]:
     return lines
 
 
-def render_batch(results: list[dict], online: bool) -> str:
+def render_batch(results: list[dict], online: bool, summary: bool = True) -> str:
     """One report for a set of files: per-file verdicts, the questions merged,
     and the things only visible across the set."""
     lines = [f"# Model assertion validation: {len(results)} files", ""]
@@ -1355,6 +1610,17 @@ def render_batch(results: list[dict], online: bool) -> str:
             lines.append(f"    ({scope})")
             lines.append("")
 
+    # Each file's lookups, so "verified" and "never checked" stay distinguishable
+    # in a batch too. Files whose lookups came back identical share one block.
+    ledgers: dict[tuple, list[dict]] = {}
+    for r in results:
+        if not r["fatal"]:
+            ledgers.setdefault(tuple(r["rep"].lookups), []).append(r)
+    for _key, group in ledgers.items():
+        scope = ("all files" if len(group) == len(results)
+                 else ", ".join(sorted(os.path.basename(r["path"]) for r in group)))
+        lines.extend(render_ledger(group[0]["rep"], online, scope))
+
     # Say what was checked and came back clean, or a quiet report looks like a
     # report where those checks never ran.
     drift = [f for r in results for f in r["rep"].findings
@@ -1372,6 +1638,12 @@ def render_batch(results: list[dict], online: bool) -> str:
         lines.append("## Across the set — shared device identity")
         lines.append("")
         lines.extend(collisions)
+
+    matrices = describe_stage_matrices(results)
+    if matrices:
+        lines.append("## Across the set — stage × grade matrix")
+        lines.append("")
+        lines.extend(matrices)
 
     # Identical questions across nine files are one question, not nine.
     merged: dict[tuple[str, str, str, str], list[str]] = {}
@@ -1402,6 +1674,19 @@ def render_batch(results: list[dict], online: bool) -> str:
             lines.extend(notes)
             lines.append("")
 
+    if summary:
+        readable = [r for r in results if r["model"]]
+        if readable:
+            lines.append("## What each model actually says")
+            lines.append("")
+            for r in readable:
+                lines.append(summarize(r["model"], r["variant"], r["brand"],
+                                       heading=f"### {os.path.basename(r['path'])}",
+                                       closing=False))
+                lines.append("")
+            lines.append(SUMMARY_CLOSING)
+            lines.append("")
+
     failed = [r for r in results if r["rep"].errors or r["fatal"]]
     if failed:
         lines.append(f"**Verdict: {len(failed)} of {len(results)} files have errors.** "
@@ -1410,9 +1695,20 @@ def render_batch(results: list[dict], online: bool) -> str:
         lines.append("**Verdict: every file is individually valid, but the set is not "
                      "coherent** — see the shared-identity section.")
     else:
-        verdict = "PASS" if online else "PASS (offline — structure only)"
+        warned = sorted(os.path.basename(r["path"]) for r in results if r["rep"].warnings)
+        if not online:
+            verdict = "PASS (offline — structure only)"
+        elif warned:
+            verdict = "PASS with warnings"
+        else:
+            verdict = "PASS"
         lines.append(f"**Verdict: {verdict}** for all {len(results)} files, "
                      f"{len(merged)} things to confirm.")
+        unbuildable = sorted(os.path.basename(r["path"]) for r in results
+                             if any(UNPUBLISHED in f["fix"] for f in r["rep"].warnings))
+        if unbuildable:
+            lines.append("")
+            lines.append(f"Cannot build yet (channel not published): {', '.join(unbuildable)}.")
     return "\n".join(lines)
 
 
@@ -1473,8 +1769,11 @@ def main() -> int:
              "summary": {"errors": len(r["rep"].errors), "warnings": len(r["rep"].warnings),
                          "confirmations": len(r["rep"].confirmations)}}
             for r in results],
-            "identity_collisions": check_identity_collisions(results)}, indent=2))
-        return 1 if any(r["rep"].errors for r in results) else 0
+            "identity_collisions": check_identity_collisions(results),
+            "stage_matrices": describe_stage_matrices(results)}, indent=2))
+        if any(r["rep"].errors for r in results):
+            return 1
+        return 1 if check_identity_collisions(results) else 0
 
     if len(paths) == 1:
         r = results[0]
@@ -1483,7 +1782,7 @@ def main() -> int:
             report += "\n\n" + summarize(r["model"], r["variant"], r["brand"])
         print(report)
     else:
-        print(render_batch(results, args.online))
+        print(render_batch(results, args.online, summary=not args.no_summary))
 
     if any(r["rep"].errors or r["fatal"] for r in results):
         return 1
