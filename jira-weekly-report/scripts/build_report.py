@@ -190,15 +190,18 @@ def group_by_status(items, site, with_progress):
 def alert_line(alert, site):
     e = alert["epic"]
     link = f"{site}/browse/{e['key']}"
-    lead = _title(e) + "："
+    lead = _title(e) + ": "
     if alert["kind"] == "empty":
-        return node(url=link, suffix=lead + "Epic 已開啟，但底下沒有任何卡片")
+        return node(url=link, suffix=lead + "Epic is open but has no child cards")
     if alert["kind"] == "to_in_progress":
-        kids = "、".join(alert["children"])
-        return node(url=link, suffix=lead + f"子卡已有 In Progress（{kids}），Epic 仍為 {e['status']}，應切 In Progress")
+        kids = ", ".join(alert["children"])
+        return node(url=link, suffix=lead + f"Child cards are In Progress ({kids}) but the Epic is still {e['status']}; "
+                                            "move it to In Progress")
     if alert["kind"] == "to_in_review":
-        return node(url=link, suffix=lead + f"子卡皆已 In Review，Epic 仍為 {e['status']}，應切 In Review")
-    return node(url=link, suffix=lead + f"子卡已全部 Done/Rejected，Epic 仍為 {e['status']}，應可關閉")
+        return node(url=link, suffix=lead + f"All child cards are In Review but the Epic is still {e['status']}; "
+                                            "move it to In Review")
+    return node(url=link, suffix=lead + f"All child cards are Done/Rejected but the Epic is still {e['status']}; "
+                                        "it can be closed")
 
 
 def build(report):
@@ -206,18 +209,18 @@ def build(report):
     detail, epics, warnings, reminders = [], [], [], []
     for p in report["projects"]:
         cards = group_by_status(p.get("cards", []), site, False)
-        detail.append(node(p["key"], children=cards or [node("無")]))
+        detail.append(node(p["key"], children=cards or [node("None")]))
         ep = group_by_status(p.get("epics", []), site, True)
-        epics.append(node(p["key"], children=ep or [node("無")]))
+        epics.append(node(p["key"], children=ep or [node("None")]))
         for e in sorted(p.get("epics", []), key=lambda e: key_sort(e["key"])):
             for a in epic_alerts(e):
                 (warnings if a["kind"] == "empty" else reminders).append(alert_line(a, site))
-    title = f"週進度報告：{report['start']} – {report['end']} ({report['timezone']})"
+    title = f"Weekly progress report: {report['start']} – {report['end']} ({report['timezone']})"
     return title, [
-        ("細節進度", detail),
-        ("專案進度（已完成/總數）", epics),
-        ("警告", warnings or [node("無")]),
-        ("提醒", reminders or [node("無")]),
+        ("Detailed progress", detail),
+        ("Project progress (done/total)", epics),
+        ("Warnings", warnings or [node("None")]),
+        ("Reminders", reminders or [node("None")]),
     ]
 
 

@@ -1,6 +1,6 @@
 ---
 name: jira-weekly-report
-description: Use when the user asks for a weekly progress report, 週報, or 每週專案進度 from Jira — one or more project keys, "what did I work on since last Friday", which Epics need a status change — or wants Jira progress to paste into a Google Doc.
+description: Use when the user asks, in any language, for a weekly progress report, weekly status update, or weekly project progress from Jira — one or more project keys, "what did I work on since last Friday", which Epics need a status change — or wants Jira progress to paste into a Google Doc.
 ---
 
 # Jira weekly progress report
@@ -129,9 +129,9 @@ Your reply is exactly these three parts, in order:
 1. The script's stdout, verbatim, in a ```` ```text ```` block.
 2. One line: the HTML path, and whether the HTML is on the clipboard (the
    script writes this to the `.stderr` file).
-3. One line of paste instructions:
-   - the `.stderr` file says "HTML copied to clipboard": "在 Google Doc 直接 Ctrl+V 貼上；點連結 → 方塊（Chip）可轉成 Jira 智慧型方塊。"
-   - anything else: "用瀏覽器開啟 HTML 檔，全選複製後貼到 Google Doc；點連結 → 方塊（Chip）可轉成 Jira 智慧型方塊。"
+3. One line of paste instructions, in the user's language:
+   - the `.stderr` file says "HTML copied to clipboard": "Paste into the Google Doc with Ctrl+V; click a link → Chip to turn it into a Jira smart chip."
+   - anything else: "Open the HTML file in a browser, select all, copy, and paste into the Google Doc; click a link → Chip to turn it into a Jira smart chip."
 
 If something stopped the run (a project key that doesn't exist, a JQL error you
 couldn't fix), say so in one line before part 1.
@@ -154,12 +154,12 @@ any type.
 Done / Rejected are closed. To Be Deployed and Merged count as still open and
 never trigger an alert.
 
-| Alert | When (Epic not Done/Rejected) |
+| Alert (report section) | When (Epic not Done/Rejected) |
 |---|---|
-| 警告: empty Epic | no children |
-| 應切 In Progress | a child is In Progress, Epic is before In Progress |
-| 應切 In Review | ignoring Done/Rejected/To Be Deployed/Merged children, the rest are all In Review, Epic is before In Review |
-| 應可關閉 | every child is Done/Rejected |
+| Warnings: Epic has no child cards | no children |
+| Reminders: move it to In Progress | a child is In Progress, Epic is before In Progress |
+| Reminders: move it to In Review | ignoring Done/Rejected/To Be Deployed/Merged children, the rest are all In Review, Epic is before In Review |
+| Reminders: it can be closed | every child is Done/Rejected |
 
 Progress is `(done/total)`: done = children in Done or Rejected, total = all
 children of the Epic.

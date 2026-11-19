@@ -256,11 +256,11 @@ class RenderText(unittest.TestCase):
         self.text = br.render_text(self.r)
 
     def test_header_has_range(self):
-        self.assertTrue(self.text.startswith("週進度報告：2026-11-06 18:00 – 2026-11-11 10:35 (Asia/Taipei)\n"))
+        self.assertTrue(self.text.startswith("Weekly progress report: 2026-11-06 18:00 – 2026-11-11 10:35 (Asia/Taipei)\n"))
 
     def test_detail_section_structure(self):
         expected = "\n".join([
-            "細節進度",
+            "Detailed progress",
             "- DEMO",
             "  - Triaged",
             f"    - {url('DEMO-10')} — title DEMO-10",
@@ -272,7 +272,7 @@ class RenderText(unittest.TestCase):
 
     def test_epic_section_structure(self):
         expected = "\n".join([
-            "專案進度（已完成/總數）",
+            "Project progress (done/total)",
             "- DEMO",
             "  - Untriaged",
             f"    - {url('DEMO-7')} — title DEMO-7 (0/0)",
@@ -283,32 +283,42 @@ class RenderText(unittest.TestCase):
         self.assertIn(expected, self.text)
 
     def test_warning_and_reminders(self):
-        self.assertIn(f"警告\n- {url('DEMO-7')} — title DEMO-7：Epic 已開啟，但底下沒有任何卡片\n", self.text)
-        self.assertIn(f"- {url('DEMO-20')} — title DEMO-20：子卡已有 In Progress（DEMO-20-c0），Epic 仍為 Untriaged，應切 In Progress",
+        self.assertIn(f"Warnings\n- {url('DEMO-7')} — title DEMO-7: Epic is open but has no child cards\n", self.text)
+        self.assertIn(f"- {url('DEMO-20')} — title DEMO-20: Child cards are In Progress (DEMO-20-c0) but the Epic is still Untriaged; move it to In Progress",
                       self.text)
-        self.assertIn(f"- {url('DEMO-30')} — title DEMO-30：子卡已全部 Done/Rejected，Epic 仍為 In Review，應可關閉", self.text)
+        self.assertIn(f"- {url('DEMO-30')} — title DEMO-30: All child cards are Done/Rejected but the Epic is still In Review; it can be closed", self.text)
+
+    def test_to_in_review_reminder(self):
+        text = br.render_text(resolved(epics=[epic("DEMO-1", "Triaged", "In Review", "Merged")]))
+        self.assertIn(f"Reminders\n- {url('DEMO-1')} — title DEMO-1: All child cards are In Review but the Epic is still Triaged;"
+                      " move it to In Review", text)
+
+    def test_report_has_no_cjk_text(self):
+        import re
+        for out in (self.text, br.render_html(self.r)):
+            self.assertIsNone(re.search(r"[\u3000-\u303f\u3400-\u9fff\uff00-\uffef]", out))
 
     def test_missing_summary_shows_url_only(self):
         text = br.render_text(resolved(cards=[{"key": "DEMO-1", "status": "Done"}],
                                        epics=[{"key": "DEMO-2", "summary": "", "status": "Untriaged", "children": []}]))
         self.assertIn(f"    - {url('DEMO-1')}\n", text)
         self.assertIn(f"    - {url('DEMO-2')} (0/0)\n", text)
-        self.assertIn(f"- {url('DEMO-2')}：Epic 已開啟，但底下沒有任何卡片", text)
+        self.assertIn(f"- {url('DEMO-2')}: Epic is open but has no child cards", text)
 
     def test_no_alerts_says_none(self):
         text = br.render_text(resolved(epics=[epic("DEMO-1", "Done", "Done")]))
-        self.assertIn("警告\n- 無\n", text)
-        self.assertIn("提醒\n- 無", text)
+        self.assertIn("Warnings\n- None\n", text)
+        self.assertIn("Reminders\n- None", text)
 
     def test_project_without_cards_still_listed(self):
         text = br.render_text(resolved(epics=[epic("DEMO-1", "Done", "Done")]))
-        self.assertIn("細節進度\n- DEMO\n  - 無\n", text)
+        self.assertIn("Detailed progress\n- DEMO\n  - None\n", text)
 
     def test_multiple_projects_each_get_level_one(self):
         r = resolved(cards=[{"key": "DEMO-1", "status": "Done"}])
         r["projects"].append({"key": "OTHER", "cards": [{"key": "OTHER-5", "status": "Triaged"}], "epics": []})
         text = br.render_text(r)
-        detail = text.split("專案進度")[0]
+        detail = text.split("Project progress")[0]
         self.assertLess(detail.index("- DEMO\n"), detail.index("- OTHER\n"))
 
 
