@@ -12,7 +12,7 @@ jira_url: "https://example.atlassian.net/browse/"   # $MATRIX_TO_SITE_JIRA_URL o
 jira_projects: ["PROJ"]                               # the project's Jira key(s), e.g. ["PROJ", "PROJHW"]
 repository:                            # written to _meta.yaml; the web editor commits here
   name: "example-org/example-repo"     # owner/name from `git remote get-url origin`
-  branch: "feature-matrix-example"     # deploy branch: never main, master or the default branch
+  branch: "matrix-table-example"     # deploy branch: never main, master or the default branch
   # tag_prefix: "matrix-table/"        # versions are tags <tag_prefix><version>
 
 columns:

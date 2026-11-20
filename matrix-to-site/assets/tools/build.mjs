@@ -44,7 +44,7 @@ for (const name of files) {
     if (command === "format") writeFileSync(path, canonical);
     else unformatted.push(name);
   }
-  components.push({ path: `feature-matrix/data/${name}`, doc });
+  components.push({ path: `matrix-table/data/${name}`, doc });
 }
 
 if (errors.length) {
@@ -55,7 +55,7 @@ if (errors.length) {
 if (command === "check") {
   if (unformatted.length) {
     console.error(unformatted.map((n) => `error: ${n} is not canonically formatted`).join("\n"));
-    console.error("Run: node feature-matrix/tools/build.mjs format");
+    console.error("Run: node matrix-table/tools/build.mjs format");
     process.exit(1);
   }
   console.log(`OK: ${files.length} components, ${featureIds.size} features`);
@@ -100,7 +100,7 @@ function gitVersions() {
 }
 
 function loadFromGit(tag) {
-  const dataPath = meta.repository?.path ?? "feature-matrix/data";
+  const dataPath = meta.repository?.path ?? "matrix-table/data";
   const names = git("ls-tree", "--name-only", `${tag}:${dataPath}`).split("\n").filter((n) => n.endsWith(".yaml"));
   const read = (name) => parseYaml(git("show", `${tag}:${dataPath}/${name}`));
   return {

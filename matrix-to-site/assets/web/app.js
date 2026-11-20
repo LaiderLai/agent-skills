@@ -10,8 +10,8 @@ import {
   utf8ToBase64,
 } from "./model.js";
 
-const DEFAULT_REPO = { name: "", branch: "main", path: "feature-matrix/data", tag_prefix: "matrix-table/" };
-const LS = "featureMatrix.";
+const DEFAULT_REPO = { name: "", branch: "main", path: "matrix-table/data", tag_prefix: "matrix-table/" };
+const LS = "matrixTable.";
 const $ = (selector, root = document) => root.querySelector(selector);
 // Present only in a standalone report produced by "Export HTML".
 const EMBEDDED = document.getElementById("embedded-data");
@@ -235,7 +235,7 @@ function loadEmbedded() {
 }
 
 async function load() {
-  $("#content").innerHTML = `<div class="loading">Loading feature matrix…</div>`;
+  $("#content").innerHTML = `<div class="loading">Loading matrix table…</div>`;
   if (EMBEDDED) {
     loadEmbedded();
   } else {
@@ -898,7 +898,7 @@ async function saveDraft({ remove = false } = {}) {
           }
           return { ...data, features };
         },
-        `feature-matrix: update ${data.id} ${data.name}`,
+        `matrix-table: update ${data.id} ${data.name}`,
       );
     } else if (isNew) {
       commitInfo = await commit(
@@ -908,7 +908,7 @@ async function saveDraft({ remove = false } = {}) {
           doc.features.push({ ...data, id: savedId });
           return doc;
         },
-        `feature-matrix: add ${data.id} ${data.name}`,
+        `matrix-table: add ${data.id} ${data.name}`,
       );
     } else {
       const original = entry.base.features.find((f) => f.id === data.id);
@@ -922,7 +922,7 @@ async function saveDraft({ remove = false } = {}) {
           else doc.features[index] = data;
           return doc;
         },
-        `feature-matrix: ${remove ? "delete" : "update"} ${data.id} ${data.name}`,
+        `matrix-table: ${remove ? "delete" : "update"} ${data.id} ${data.name}`,
       );
     }
     state.saving = false;
@@ -1038,7 +1038,7 @@ function openCreateVersion() {
     event.preventDefault();
     const form = new FormData(event.target);
     const version = form.get("version").trim();
-    const message = form.get("message").trim() || `Feature matrix ${version}`;
+    const message = form.get("message").trim() || `Matrix table ${version}`;
     const button = $("#version-create");
     const box = $("#version-error");
     button.disabled = true;
@@ -1156,7 +1156,7 @@ function exportCsv() {
     }
   }
   const blob = new Blob([`\ufeff${lines.join("\r\n")}`], { type: "text/csv" });
-  const a = Object.assign(document.createElement("a"), { href: URL.createObjectURL(blob), download: "feature-matrix.csv" });
+  const a = Object.assign(document.createElement("a"), { href: URL.createObjectURL(blob), download: "matrix-table.csv" });
   a.click();
   URL.revokeObjectURL(a.href);
 }
@@ -1278,7 +1278,7 @@ async function reload() {
     render();
   } catch (e) {
     $("#content").innerHTML = `<div class="card card-pad" style="max-width:640px;margin:40px auto">
-      <h3>Could not load the feature matrix</h3><p class="muted">${esc(e.message)}</p>
+      <h3>Could not load the matrix table</h3><p class="muted">${esc(e.message)}</p>
       <p>Sign in with a GitHub token to load live data from the repository.</p>
       <button class="btn btn-primary" data-action="settings">Sign in</button></div>`;
   }

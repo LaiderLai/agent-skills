@@ -1,6 +1,6 @@
 ---
 name: matrix-to-site
-description: Use when someone has a feature list, support matrix or scope tracking spreadsheet (CSV export with platform/milestone YES/NO/TBD style columns, remarks or pasted logs) that is hard to maintain and wants it turned into YAML in git with a browsable, editable web page on GitHub Pages, version snapshots, or a standalone HTML report for customers — or asks to deploy such a feature matrix site to a repo or branch, even if they only say "make this CSV a page like our other project's feature matrix" or "turn our feature list CSV into a web page and deploy it".
+description: Use when someone has a feature list, support matrix or scope tracking spreadsheet (CSV export with platform/milestone YES/NO/TBD style columns, remarks or pasted logs) that is hard to maintain and wants it turned into YAML in git with a browsable, editable web page on GitHub Pages, version snapshots, or a standalone HTML report for customers — or asks to deploy such a matrix table site to a repo or branch, even if they only say "make this CSV a page like our other project's matrix table" or "turn our feature list CSV into a web page and deploy it".
 ---
 
 # Matrix to Site
@@ -36,7 +36,7 @@ relative to this skill's directory; `$REPO` is the target repo, `$B` the deploy 
      If the project has no Jira, leave `jira_url` out and keys stay plain text.
    - **Deploy branch** (`$B`), optional. It must never be `main`, `master` or the
      repo's default branch. If the user gives none — or asks for one of those —
-     use `feature-matrix-<project-slug>` (lowercase, hyphens) and say why; they can
+     use `matrix-table-<project-slug>` (lowercase, hyphens) and say why; they can
      merge it later through a normal PR.
    - **GitHub repository** is derived, not asked: parse `owner/name` from
      `git -C $REPO remote get-url origin` (`git@github.com:owner/name.git` or
@@ -70,13 +70,13 @@ relative to this skill's directory; `$REPO` is the target repo, `$B` the deploy 
    - **Re-import the CSV**: replaces all of `data/`, losing edits made on the web since
      the last import. Suggest creating a version first so the old data stays viewable,
      then re-run with `--force` and continue with step 6.
-6. **Convert**: `python3 scripts/convert_csv.py --mapping $WORK/mapping.yaml --csv <csv> --out $REPO/feature-matrix/data`
+6. **Convert**: `python3 scripts/convert_csv.py --mapping $WORK/mapping.yaml --csv <csv> --out $REPO/matrix-table/data`
    It must exit 0. A `MISMATCH`, "status values not in mapping" or "no features found"
    means the mapping is wrong — fix it and re-run; never edit the generated YAML to
    make numbers fit.
-7. **Validate**: in `$REPO`, `node feature-matrix/tools/build.mjs format`, then
-   `node feature-matrix/tools/build.mjs check` and
-   `node feature-matrix/tools/build.mjs build $WORK/preview`.
+7. **Validate**: in `$REPO`, `node matrix-table/tools/build.mjs format`, then
+   `node matrix-table/tools/build.mjs check` and
+   `node matrix-table/tools/build.mjs build $WORK/preview`.
    Run the repo's own linters on the new files if it has any (e.g. `yamllint` with its `.yamllint`).
 8. **Commit and push** one commit to `$B` only (`git push -u origin $B`). Never
    force-push, and never push to `main`, `master` or the default branch. If the push

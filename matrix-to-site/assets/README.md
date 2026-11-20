@@ -1,4 +1,4 @@
-# Feature Matrix
+# Matrix Table
 
 What each platform and milestone supports, with notes and test evidence —
 browsable, editable from the browser, versioned with git tags and exportable
@@ -7,7 +7,7 @@ as a standalone HTML report. Generated from a spreadsheet export.
 ## Layout
 
 ```
-feature-matrix/
+matrix-table/
 ├── data/
 │   ├── _meta.yaml          # platforms, status columns (platform x milestone), sections, repo settings
 │   └── A.01-<name>.yaml    # one file per component
@@ -60,8 +60,8 @@ the same feature concurrently is rejected.
 **In git:** edit the YAML, then
 
 ```sh
-node feature-matrix/tools/build.mjs format   # normalise formatting
-node feature-matrix/tools/build.mjs check    # validate (also run by CI)
+node matrix-table/tools/build.mjs format   # normalise formatting
+node matrix-table/tools/build.mjs check    # validate (also run by CI)
 ```
 
 ## Versions
@@ -79,5 +79,5 @@ opens offline (for customers). **Export CSV** on the overview gives a spreadshee
 ## Local preview
 
 ```sh
-node feature-matrix/tools/build.mjs build /tmp/fm && python3 -m http.server -d /tmp/fm 8000
+node matrix-table/tools/build.mjs build /tmp/fm && python3 -m http.server -d /tmp/fm 8000
 ```

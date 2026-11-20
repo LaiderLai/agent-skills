@@ -143,7 +143,7 @@ MAPPING = {
     "header_rows": 2,
     "jira_url": "https://example.atlassian.net/browse/",
     "jira_projects": ["PROJ"],
-    "repository": {"name": "example-org/example-repo", "branch": "feature-matrix-demo"},
+    "repository": {"name": "example-org/example-repo", "branch": "matrix-table-demo"},
     "columns": {
         "section": 0,
         "component_id": 1,
@@ -381,7 +381,7 @@ class ScaffoldTest(unittest.TestCase):
 
     def test_install_and_reinstall(self):
         self.assertEqual(
-            self.scaffold("--deploy-branch", "feature-matrix-demo").returncode, 0
+            self.scaffold("--deploy-branch", "matrix-table-demo").returncode, 0
         )
         with open(
             os.path.join(self.repo, ".github", "workflows", "matrix-site.yml")
@@ -389,43 +389,27 @@ class ScaffoldTest(unittest.TestCase):
             workflow = f.read()
         self.assertTrue(workflow.startswith("name: Matrix Site"))
         self.assertNotIn("__DEPLOY_BRANCH__", workflow)
-        self.assertIn("refs/heads/feature-matrix-demo", workflow)
+        self.assertIn("refs/heads/matrix-table-demo", workflow)
         self.assertTrue(
             os.path.exists(
-                os.path.join(self.repo, "feature-matrix", "tools", "convert_csv.py")
+                os.path.join(self.repo, "matrix-table", "tools", "convert_csv.py")
             )
         )
         self.assertEqual(
-            self.scaffold("--deploy-branch", "feature-matrix-demo").returncode, 1
+            self.scaffold("--deploy-branch", "matrix-table-demo").returncode, 1
         )  # already installed
-
-    def test_legacy_workflow_replaced_on_force(self):
-        legacy = os.path.join(self.repo, ".github", "workflows", "feature-matrix.yml")
-        os.makedirs(os.path.dirname(legacy))
-        with open(legacy, "w") as f:
-            f.write("name: Feature Matrix\n")
-        self.assertEqual(
-            self.scaffold("--deploy-branch", "feature-matrix-demo").returncode, 1
-        )
-        self.assertEqual(
-            self.scaffold(
-                "--deploy-branch", "feature-matrix-demo", "--force"
-            ).returncode,
-            0,
-        )
-        self.assertFalse(os.path.exists(legacy))
 
     @unittest.skipUnless(shutil.which("node"), "node not installed")
     def test_end_to_end_build(self):
         self.assertEqual(
-            self.scaffold("--deploy-branch", "feature-matrix-demo").returncode, 0
+            self.scaffold("--deploy-branch", "matrix-table-demo").returncode, 0
         )
         csv_path = os.path.join(self.tmp, "features.csv")
         write_csv(csv_path)
         mapping = os.path.join(self.tmp, "mapping.yaml")
         with open(mapping, "w") as f:
             yaml.safe_dump(MAPPING, f)
-        data = os.path.join(self.repo, "feature-matrix", "data")
+        data = os.path.join(self.repo, "matrix-table", "data")
         out = run(
             os.path.join(SCRIPTS, "convert_csv.py"),
             "--mapping",
@@ -436,7 +420,7 @@ class ScaffoldTest(unittest.TestCase):
             data,
         )
         self.assertEqual(out.returncode, 0, out.stdout)
-        build = os.path.join(self.repo, "feature-matrix", "tools", "build.mjs")
+        build = os.path.join(self.repo, "matrix-table", "tools", "build.mjs")
         for args in (["format"], ["check"], ["build", os.path.join(self.tmp, "dist")]):
             res = subprocess.run(
                 ["node", build, *args], check=False, capture_output=True, text=True

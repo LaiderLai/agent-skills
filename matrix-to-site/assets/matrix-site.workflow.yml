@@ -8,14 +8,14 @@ on:
     tags:
       - "matrix-table/*"
     paths:
-      - "feature-matrix/**"
-      - ".github/workflows/feature-matrix.yml"
+      - "matrix-table/**"
+      - ".github/workflows/matrix-site.yml"
   pull_request:
     branches:
       - __DEPLOY_BRANCH__
     paths:
-      - "feature-matrix/**"
-      - ".github/workflows/feature-matrix.yml"
+      - "matrix-table/**"
+      - ".github/workflows/matrix-site.yml"
   workflow_dispatch:
 
 permissions:
@@ -26,7 +26,7 @@ env:
   DEPLOY_BRANCH: __DEPLOY_BRANCH__
 
 concurrency:
-  group: feature-matrix-${{ github.event_name == 'pull_request' && github.ref || 'pages' }}
+  group: matrix-table-${{ github.event_name == 'pull_request' && github.ref || 'pages' }}
   cancel-in-progress: true
 
 jobs:
@@ -48,10 +48,10 @@ jobs:
           package-manager-cache: false
 
       - name: Validate data files
-        run: node feature-matrix/tools/build.mjs check
+        run: node matrix-table/tools/build.mjs check
 
       - name: Build static site
-        run: node feature-matrix/tools/build.mjs build _site
+        run: node matrix-table/tools/build.mjs build _site
 
       - uses: actions/upload-pages-artifact@v5
         if: github.event_name != 'pull_request'

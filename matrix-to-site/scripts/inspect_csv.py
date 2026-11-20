@@ -214,7 +214,7 @@ def main():
     )
     print('repository:\n  name: "TODO owner/name"   # from `git remote get-url origin`')
     print(
-        '  branch: "TODO"   # deploy branch; never main/master/default, e.g. feature-matrix-<project>'
+        '  branch: "TODO"   # deploy branch; never main/master/default, e.g. matrix-table-<project>'
     )
     print("columns:")
     print(line("section", category[0] if category else None))

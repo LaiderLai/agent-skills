@@ -1,4 +1,4 @@
-// Shared data model for the feature matrix: used by the web editor (browser)
+// Shared data model for the matrix table: used by the web editor (browser)
 // and by tools/build.mjs (Node, CI) so both write byte-identical YAML.
 import { load, dump } from "./vendor/js-yaml.mjs";
 

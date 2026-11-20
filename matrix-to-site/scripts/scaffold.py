@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""Install the feature-matrix site (web UI, tools, CI workflow) into a git repo.
+"""Install the matrix-table site (web UI, tools, CI workflow) into a git repo.
 
     python3 scaffold.py <repo> --deploy-branch <branch> --mapping <mapping.yaml> [--force]
 
-Copies the bundled assets into <repo>/feature-matrix/ and the GitHub Actions
+Copies the bundled assets into <repo>/matrix-table/ and the GitHub Actions
 workflow into <repo>/.github/workflows/matrix-site.yml, with the deploy
 branch filled in. The data itself comes from convert_csv.py. Refuses to
-overwrite an existing feature-matrix/ (or workflow) unless --force is given.
+overwrite an existing matrix-table/ (or workflow) unless --force is given.
 """
 
 import argparse
@@ -73,15 +73,11 @@ def main():
     if args.deploy_branch in protected:
         sys.exit(
             f"error: refusing to deploy from {args.deploy_branch!r} (main, master and the default branch "
-            "are not allowed); use a dedicated branch such as feature-matrix-<project>"
+            "are not allowed); use a dedicated branch such as matrix-table-<project>"
         )
-    target = repo / "feature-matrix"
+    target = repo / "matrix-table"
     workflow = repo / ".github" / "workflows" / "matrix-site.yml"
-    # Older installs used feature-matrix.yml; GitHub keys workflows by path, so keep only one.
-    legacy = repo / ".github" / "workflows" / "feature-matrix.yml"
-    existing = [
-        p for p in (target / "web", target / "tools", workflow, legacy) if p.exists()
-    ]
+    existing = [p for p in (target / "web", target / "tools", workflow) if p.exists()]
     if existing and not args.force:
         sys.exit(
             "error: already installed ("
@@ -103,26 +99,21 @@ def main():
         shutil.copy2(ASSETS / "README.md", target / "README.md")
 
     workflow.parent.mkdir(parents=True, exist_ok=True)
-    if legacy.exists():
-        legacy.unlink()
-        print(
-            f"removed old workflow {legacy.relative_to(repo)} (replaced by {workflow.name})"
-        )
     text = (ASSETS / "matrix-site.workflow.yml").read_text(encoding="utf-8")
     workflow.write_text(
         text.replace("__DEPLOY_BRANCH__", args.deploy_branch), encoding="utf-8"
     )
 
     gitignore = repo / ".gitignore"
-    line = "feature-matrix/dist/"
+    line = "matrix-table/dist/"
     current = gitignore.read_text(encoding="utf-8") if gitignore.exists() else ""
     if line not in current.splitlines():
         sep = "" if not current or current.endswith("\n") else "\n"
         gitignore.write_text(
-            f"{current}{sep}\n# Feature matrix build output\n{line}\n", encoding="utf-8"
+            f"{current}{sep}\n# Matrix table build output\n{line}\n", encoding="utf-8"
         )
 
-    print(f"installed feature-matrix into {target}")
+    print(f"installed matrix-table into {target}")
     print(f"workflow: {workflow.relative_to(repo)} (deploys {args.deploy_branch})")
     if not (target / "data" / "_meta.yaml").exists():
         print("next: run convert_csv.py --out", target / "data")
