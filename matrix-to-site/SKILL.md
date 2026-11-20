@@ -30,8 +30,10 @@ relative to this skill's directory; `$REPO` is the target repo, `$B` the deploy 
    - **Project name** and its **Jira project key(s)** — ask in one question
      (e.g. "Project name and Jira key(s)? e.g. `Falcon` / `FALCON`"); a project may
      have several keys. The page title is always `<PROJECT NAME> Matrix table` —
-     project name in upper case whatever the user typed (`falcon` → `FALCON`);
-     Jira links always use `https://example.atlassian.net/browse/` with those keys.
+     project name in upper case whatever the user typed (`falcon` → `FALCON`).
+   - **Jira site** for linking those keys: use `$MATRIX_TO_SITE_JIRA_URL` if it is set
+     (e.g. `https://<site>.atlassian.net`); otherwise ask for it in the same question.
+     If the project has no Jira, leave `jira_url` out and keys stay plain text.
    - **Deploy branch** (`$B`), optional. It must never be `main`, `master` or the
      repo's default branch. If the user gives none — or asks for one of those —
      use `feature-matrix-<project-slug>` (lowercase, hyphens) and say why; they can
@@ -43,12 +45,13 @@ relative to this skill's directory; `$REPO` is the target repo, `$B` the deploy 
      editor needs to commit changes.
    If you cannot ask, pick sensible values (e.g. the Jira keys that appear in the CSV
    notes) and report them.
-2. **Draft the mapping**:
-   `python3 scripts/inspect_csv.py <csv> > /tmp/opencode/mapping.yaml`
+2. **Draft the mapping** in a fresh scratch directory (`WORK=$(mktemp -d)`; note the
+   path, shell variables may not survive between your commands):
+   `python3 scripts/inspect_csv.py <csv> > $WORK/mapping.yaml`
    (column profile on stderr). If it reports `NOT UTF-8`, check the names in the
    profile are readable; if they are garbled, ask the user to re-export as UTF-8 or
    re-run with `--encoding <name>`. Edit every `TODO`/guess using
-   [references/mapping.md](references/mapping.md). Set `title`, `jira_projects`,
+   [references/mapping.md](references/mapping.md). Set `title`, `jira_url`, `jira_projects`,
    `repository.name` and `repository.branch: $B`.
 3. **Confirm the mapping with the user** before converting — show it as a short
    table: platforms, each status column (CSV header → platform · milestone), status
@@ -58,7 +61,7 @@ relative to this skill's directory; `$REPO` is the target repo, `$B` the deploy 
    said not to ask; then list these as decisions in the report.
 4. **Branch**: `$REPO` must be clean. Create `$B` from the up-to-date default branch
    (or check it out if it exists).
-5. **Install**: `python3 scripts/scaffold.py $REPO --deploy-branch $B --mapping /tmp/opencode/mapping.yaml`
+5. **Install**: `python3 scripts/scaffold.py $REPO --deploy-branch $B --mapping $WORK/mapping.yaml`
    It refuses `main`, `master` and the default branch; if it warns that the default
    branch could not be determined, confirm with the user that `$B` is not it.
    If it reports **already installed**, stop and ask the user which they want — never
@@ -67,13 +70,13 @@ relative to this skill's directory; `$REPO` is the target repo, `$B` the deploy 
    - **Re-import the CSV**: replaces all of `data/`, losing edits made on the web since
      the last import. Suggest creating a version first so the old data stays viewable,
      then re-run with `--force` and continue with step 6.
-6. **Convert**: `python3 scripts/convert_csv.py --mapping /tmp/opencode/mapping.yaml --csv <csv> --out $REPO/feature-matrix/data`
+6. **Convert**: `python3 scripts/convert_csv.py --mapping $WORK/mapping.yaml --csv <csv> --out $REPO/feature-matrix/data`
    It must exit 0. A `MISMATCH`, "status values not in mapping" or "no features found"
    means the mapping is wrong — fix it and re-run; never edit the generated YAML to
    make numbers fit.
 7. **Validate**: in `$REPO`, `node feature-matrix/tools/build.mjs format`, then
    `node feature-matrix/tools/build.mjs check` and
-   `node feature-matrix/tools/build.mjs build /tmp/opencode/fm-preview`.
+   `node feature-matrix/tools/build.mjs build $WORK/preview`.
    Run the repo's own linters on the new files if it has any (e.g. `yamllint` with its `.yamllint`).
 8. **Commit and push** one commit to `$B` only (`git push -u origin $B`). Never
    force-push, and never push to `main`, `master` or the default branch. If the push

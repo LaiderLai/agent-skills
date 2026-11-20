@@ -8,7 +8,7 @@ Column indexes are **0-based**.
 title: "Example Matrix table"          # always "<Project name> Matrix table"
 header_rows: 2                         # rows to skip before data
 # encoding: "cp950"                   # only when the CSV is not UTF-8 (inspect_csv.py fills it in)
-jira_url: "https://example.atlassian.net/browse/"   # fixed: links Jira keys in notes
+jira_url: "https://example.atlassian.net/browse/"   # $MATRIX_TO_SITE_JIRA_URL or asked; omit = no links
 jira_projects: ["PROJ"]                               # the project's Jira key(s), e.g. ["PROJ", "PROJHW"]
 repository:                            # written to _meta.yaml; the web editor commits here
   name: "example-org/example-repo"     # owner/name from `git remote get-url origin`

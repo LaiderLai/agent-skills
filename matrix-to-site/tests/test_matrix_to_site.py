@@ -177,9 +177,14 @@ def write_csv(path, rows=None, encoding="utf-8"):
         f.write(buf.getvalue())
 
 
-def run(*args, cwd=None):
+def run(*args, cwd=None, env=None):
     return subprocess.run(
-        [sys.executable, *args], check=False, cwd=cwd, capture_output=True, text=True
+        [sys.executable, *args],
+        check=False,
+        cwd=cwd,
+        capture_output=True,
+        text=True,
+        env=env,
     )
 
 
@@ -299,6 +304,41 @@ class InspectTest(unittest.TestCase):
             self.assertIn(
                 "empty column 10", out.stdout
             )  # empty milestone is pointed out
+
+    def draft(self, jira_env):
+        env = {k: v for k, v in os.environ.items() if k != "MATRIX_TO_SITE_JIRA_URL"}
+        if jira_env is not None:
+            env["MATRIX_TO_SITE_JIRA_URL"] = jira_env
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "features.csv")
+            write_csv(path)
+            out = run(os.path.join(SCRIPTS, "inspect_csv.py"), path, env=env)
+            self.assertEqual(out.returncode, 0, out.stderr)
+            return yaml.safe_load(out.stdout)
+
+    def test_jira_url_from_env(self):
+        self.assertEqual(
+            self.draft("https://jira.example.com")["jira_url"],
+            "https://jira.example.com/browse/",
+        )
+
+    def test_jira_url_unset_is_left_for_the_agent_to_ask(self):
+        self.assertNotIn("jira_url", self.draft(None))  # emitted as a commented TODO
+
+    def test_jira_url_normalisation(self):
+        import inspect_csv
+
+        for given in (
+            "https://x.atlassian.net",
+            "https://x.atlassian.net/",
+            "https://x.atlassian.net/browse/",
+        ):
+            self.assertEqual(
+                inspect_csv.jira_browse_url(given),
+                "https://x.atlassian.net/browse/",
+                given,
+            )
+        self.assertEqual(inspect_csv.jira_browse_url("  "), "")
 
     def test_empty_file(self):
         with tempfile.TemporaryDirectory() as tmp:

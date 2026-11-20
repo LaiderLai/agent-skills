@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Profile a feature-list CSV and print a draft mapping for convert_csv.py.
 
-    python3 inspect_csv.py features.csv > /tmp/opencode/mapping.draft.yaml
+    python3 inspect_csv.py features.csv > "$(mktemp -d)/mapping.yaml"
 
 The draft is a starting point: every guess is marked "# guess". Review it
 against the column profile printed to stderr, fix it, and confirm the
@@ -12,6 +12,7 @@ import argparse
 import collections
 import csv
 import io
+import os
 import re
 import sys
 from pathlib import Path
@@ -33,6 +34,14 @@ def read_csv(path, encoding=None):
     sys.exit(
         f"error: cannot decode {path} as {encoding or ', '.join(ENCODINGS)}; re-export as UTF-8 or pass --encoding"
     )
+
+
+def jira_browse_url(site):
+    """Normalise a Jira site URL to the issue-link prefix: https://x.atlassian.net -> .../browse/."""
+    site = site.strip().rstrip("/")
+    if not site:
+        return ""
+    return site + "/" if site.endswith("/browse") else site + "/browse/"
 
 
 STATUS_WORDS = {
@@ -189,7 +198,13 @@ def main():
     print(f"header_rows: {header_rows}   # guess")
     if encoding != "utf-8-sig":
         print(f'encoding: "{encoding}"   # detected; the CSV is not UTF-8')
-    print('jira_url: "https://example.atlassian.net/browse/"   # fixed')
+    jira = jira_browse_url(os.environ.get("MATRIX_TO_SITE_JIRA_URL", ""))
+    if jira:
+        print(f'jira_url: "{jira}"   # from $MATRIX_TO_SITE_JIRA_URL')
+    else:
+        print(
+            '# jira_url: "https://<site>.atlassian.net/browse/"   # TODO $MATRIX_TO_SITE_JIRA_URL unset: ask'
+        )
     keys = collections.Counter(
         k for r in rows for c in r for k in re.findall(r"\b([A-Z][A-Z0-9]+)-\d+\b", c)
     )
