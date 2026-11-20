@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Feature Matrix</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23E95420'/%3E%3Cpath d='M9 17l5 5 9-11' stroke='white' stroke-width='3.5' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="style.css">
+  <script type="module" src="app.js"></script>
+</head>
+<body>
+  <header class="topbar">
+    <button class="icon-btn menu-btn" data-action="toggle-nav" aria-label="Menu">☰</button>
+    <a class="brand" href="#/">
+      <span class="brand-mark">✓</span>
+      <span class="brand-title" id="app-title">Feature Matrix</span>
+    </a>
+    <label class="search">
+      <span aria-hidden="true">⌕</span>
+      <input id="global-search" type="search" placeholder="Search features, notes, Jira…  ( / )" autocomplete="off">
+    </label>
+    <label class="focus-select" title="Milestone used for counts and filters">
+      <span>Focus</span>
+      <select id="focus-column"></select>
+    </label>
+    <label class="focus-select" id="version-picker" title="Frozen versions (git tags)">
+      <span>Version</span>
+      <select id="version-select"></select>
+    </label>
+    <span class="source-badge" id="source-badge"></span>
+    <button class="btn btn-ghost app-only" data-action="refresh" title="Reload data">⟳</button>
+    <button class="btn app-only" data-action="export-html" title="Download a standalone HTML report">⤓ Export HTML</button>
+    <button class="btn app-only" id="account-btn" data-action="settings">Sign in to edit</button>
+  </header>
+
+  <div class="layout">
+    <nav class="sidebar" id="sidebar"></nav>
+    <main class="content" id="content">
+      <div class="loading">Loading feature matrix…</div>
+    </main>
+  </div>
+
+  <div class="scrim" id="scrim" data-action="close-drawer"></div>
+  <aside class="drawer" id="drawer" aria-hidden="true"></aside>
+  <dialog id="dialog"></dialog>
+  <div class="toasts" id="toasts"></div>
+</body>
+</html>

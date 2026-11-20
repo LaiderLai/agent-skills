@@ -1,0 +1,11 @@
+{
+  "name": "feature-matrix",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "check": "node tools/build.mjs check",
+    "format": "node tools/build.mjs format",
+    "build": "node tools/build.mjs build dist",
+    "serve": "node tools/build.mjs build dist && python3 -m http.server -d dist 8000"
+  }
+}
