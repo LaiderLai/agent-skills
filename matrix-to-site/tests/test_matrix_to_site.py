@@ -429,5 +429,16 @@ class ScaffoldTest(unittest.TestCase):
         self.assertTrue(os.path.exists(os.path.join(self.tmp, "dist", "data.json")))
 
 
+@unittest.skipUnless(shutil.which("node"), "node not installed")
+class NodeTestsTest(unittest.TestCase):
+    """Runs the web model's JavaScript tests (tests/*.test.mjs) under node --test."""
+
+    def test_node_suite(self):
+        res = subprocess.run(
+            ["node", "--test", HERE], check=False, capture_output=True, text=True
+        )
+        self.assertEqual(res.returncode, 0, res.stdout[-2000:] + res.stderr[-2000:])
+
+
 if __name__ == "__main__":
     unittest.main()

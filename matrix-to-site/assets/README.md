@@ -57,6 +57,13 @@ branch, live immediately for signed-in users; the read-only snapshot redeploys i
 1–2 minutes. Concurrent edits to different features merge automatically; editing
 the same feature concurrently is rejected.
 
+**Batch status change (e.g. after a review meeting):** tick the rows (or the header
+checkbox for all visible rows; works across components on the search / "Open items"
+page), choose the column and YES / NO / TBD / —, optionally type a meeting note, then
+**Apply & save**. Everything is saved as one commit. Items already at that value are
+skipped; the note is appended to each changed item's notes for that column's platform
+as `YYYY-MM-DD · <column>: <old> → <new> — <note>`.
+
 **In git:** edit the YAML, then
 
 ```sh

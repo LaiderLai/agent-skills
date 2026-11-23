@@ -164,6 +164,57 @@ function escapeRe(text) {
   return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+export function sameFeature(a, b, meta) {
+  return JSON.stringify(normalizeFeature(a ?? {}, meta)) === JSON.stringify(normalizeFeature(b ?? {}, meta));
+}
+
+const labelOf = (value) => STATUSES.find((s) => s.id === value)?.label ?? "—";
+
+/** One meeting-note line: `YYYY-MM-DD · <column>: <OLD> → <NEW> — <note>`. */
+export function batchNoteLine(date, columnName, oldValue, newValue, note) {
+  return `${date} · ${columnName}: ${labelOf(oldValue)} → ${labelOf(newValue)} — ${cleanText(note)}`;
+}
+
+/**
+ * Set `column` to `value` ("unset" removes it) on the features of `doc` listed in `ids`.
+ * Features already at `value` are skipped untouched. A non-empty `note` is appended to each
+ * changed feature's `notes[noteKey]`. Ids of other components are ignored; ids of this
+ * component that no longer exist are reported in `missing`. `doc` is not mutated.
+ */
+export function applyBatch(doc, ids, column, value, { noteKey, note = "", date, columnName }) {
+  const out = JSON.parse(JSON.stringify(doc));
+  const wanted = new Set(ids);
+  const changed = [];
+  const skipped = [];
+  const text = cleanText(note);
+  for (const feature of out.features ?? []) {
+    if (!wanted.has(feature.id)) continue;
+    const old = feature.status?.[column] || "unset";
+    if (old === value) {
+      skipped.push(feature.id);
+      continue;
+    }
+    feature.status = { ...feature.status };
+    if (value === "unset") delete feature.status[column];
+    else feature.status[column] = value;
+    if (!Object.keys(feature.status).length) delete feature.status;
+    if (text) {
+      const line = batchNoteLine(date, columnName, old, value, text);
+      const existing = cleanText(feature.notes?.[noteKey]);
+      feature.notes = { ...feature.notes, [noteKey]: existing ? `${existing}\n\n${line}` : line };
+    }
+    changed.push(feature.id);
+  }
+  const present = new Set((out.features ?? []).map((f) => f.id));
+  const missing = ids.filter((id) => id.startsWith(`${doc.id}.`) && !present.has(id));
+  return { doc: out, changed, skipped, missing };
+}
+
+/** Commit message for a batch: `matrix-table: set <title> to <LABEL> for N feature(s)`. */
+export function batchCommitMessage(columnTitle, value, n) {
+  return `matrix-table: set ${columnTitle} to ${labelOf(value)} for ${n} feature${n === 1 ? "" : "s"}`;
+}
+
 export function nextFeatureId(component) {
   const max = Math.max(0, ...component.features.map((f) => Number(f.id.split(".").pop()) || 0));
   return `${component.id}.${max + 1}`;

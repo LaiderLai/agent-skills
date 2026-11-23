@@ -22,6 +22,8 @@
   --unset: #e3e5e9;
   --danger: #c7162b;
   --focus-col: #fff8f4;
+  --pick: #2f6fd6;
+  --pick-soft: #eaf1fd;
   --radius: 10px;
   --shadow: 0 1px 2px rgba(16, 24, 40, 0.06), 0 1px 3px rgba(16, 24, 40, 0.08);
   --shadow-lg: 0 20px 40px rgba(16, 24, 40, 0.18);
@@ -51,6 +53,8 @@
     --tbd-bar: #ffa000;
     --unset: #33363e;
     --focus-col: #2a211d;
+    --pick: #6ea0f0;
+    --pick-soft: #1c2738;
     color-scheme: dark;
   }
 }
@@ -333,6 +337,30 @@ dialog::backdrop { background: rgba(10, 12, 16, 0.45); }
 .toast.error { background: var(--danger); }
 @keyframes toast-in { from { transform: translateY(10px); opacity: 0; } }
 
+/* ---------- batch status change ---------- */
+.matrix th.sel, .matrix td.sel { width: 34px; text-align: center; padding-left: 12px; padding-right: 4px; }
+.matrix td.sel input, .matrix th.sel input { width: 16px; height: 16px; cursor: pointer; accent-color: var(--accent); }
+.matrix tbody tr.picked td { background: var(--pick-soft); }
+.matrix tbody tr.picked td.sel { box-shadow: inset 3px 0 0 var(--pick); }
+body:has(#batch-bar) .content { padding-bottom: 150px; }
+.batch-items { margin: 4px 0 6px; font-size: 13px; }
+.batch-items summary { cursor: pointer; color: var(--muted); }
+.batch-items ul { margin: 6px 0 0; padding-left: 18px; max-height: 220px; overflow: auto; }
+.batch-bar {
+  position: fixed; left: 50%; bottom: 18px; transform: translateX(-50%); z-index: 45;
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap; width: min(1100px, calc(100vw - 32px));
+  padding: 12px 16px; border-radius: 14px; background: var(--surface); border: 2px solid var(--accent);
+  box-shadow: var(--shadow-lg);
+}
+.batch-bar .batch-count { white-space: nowrap; }
+.batch-bar .batch-field { display: flex; align-items: center; gap: 6px; font-size: 13px; }
+.batch-bar select { border: 1px solid var(--border); background: var(--surface); border-radius: 8px; padding: 5px 8px; }
+.batch-bar .seg button { padding: 5px 12px; font-size: 12.5px; }
+.batch-bar textarea {
+  flex: 1 1 260px; min-width: 200px; resize: vertical; border: 1px solid var(--border); border-radius: 8px;
+  background: var(--surface); padding: 6px 10px; font: inherit; font-size: 13px; line-height: 1.4;
+}
+
 /* ---------- versions & export ---------- */
 [hidden] { display: none !important; }
 body.exported .app-only { display: none !important; }
@@ -363,6 +391,6 @@ body.exported .app-only { display: none !important; }
   .brand-title { display: none; }
 }
 @media print {
-  .topbar, .sidebar, .drawer, .scrim { display: none; }
+  .topbar, .sidebar, .drawer, .scrim, .batch-bar, .matrix th.sel, .matrix td.sel { display: none !important; }
   .content { padding: 0; }
 }

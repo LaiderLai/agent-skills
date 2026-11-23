@@ -8,8 +8,9 @@ description: Use when someone has a feature list, support matrix or scope tracki
 ## Overview
 
 `assets/` holds a finished, tested site: static web UI (overview, matrix, search,
-detail drawer, in-browser editing that commits through the GitHub API, version tags,
-HTML/CSV export), `build.mjs` validator/builder and a GitHub Pages workflow.
+detail drawer, in-browser editing and batch status changes that commit through the
+GitHub API, version tags, HTML/CSV export), `build.mjs` validator/builder and a
+GitHub Pages workflow.
 Your job is the part that differs per spreadsheet: **get the column mapping right,
 prove the conversion is lossless, push, and hand over the GitHub settings steps.**
 Do not write your own UI, converter or workflow — the bundled ones already handle

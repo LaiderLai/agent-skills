@@ -3,11 +3,13 @@ import {
   GENERAL,
   parseYaml,
   dumpComponent,
-  normalizeFeature,
   normalizeComponent,
   validateComponent,
   nextFeatureId,
   utf8ToBase64,
+  applyBatch,
+  sameFeature,
+  batchCommitMessage,
 } from "./model.js";
 
 const DEFAULT_REPO = { name: "", branch: "main", path: "matrix-table/data", tag_prefix: "matrix-table/" };
@@ -31,6 +33,9 @@ const state = {
   filter: { status: "", text: "" },
   draft: null,
   saving: false,
+  selection: new Set(), // feature ids ticked for a batch status change
+  batch: { column: null, value: null, note: "" },
+  visibleIds: [],
 };
 
 // ---------------------------------------------------------------- helpers
@@ -153,6 +158,14 @@ async function gh(path, { method = "GET", body, cache = "no-store" } = {}) {
 
 const encodePath = (path) => path.split("/").map(encodeURIComponent).join("/");
 
+/** File text at `ref`. The Contents API leaves `content` empty above 1 MB; read those as blobs. */
+async function readFileAt(path, ref) {
+  const { name } = repo();
+  const file = await gh(`/repos/${name}/contents/${encodePath(path)}?ref=${encodeURIComponent(ref)}`);
+  const b64 = file.content || (await gh(`/repos/${name}/git/blobs/${file.sha}`, { cache: "default" })).content;
+  return { sha: file.sha, text: decodeBase64(b64) };
+}
+
 async function loadLive() {
   const { name, branch, path, tagPrefix } = repo();
   state.versions = await listLiveVersions().catch((e) => {
@@ -268,6 +281,7 @@ function rebuildIndex() {
   for (const entry of state.components) {
     for (const feature of entry.doc.features) state.index.set(feature.id, { entry, feature });
   }
+  for (const id of state.selection) if (!state.index.has(id)) state.selection.delete(id);
 }
 
 /**
@@ -292,9 +306,8 @@ async function commit(entry, apply, message) {
     result = await put(apply(clone(entry.base)), entry.sha);
   } catch (e) {
     if (!(e.status === 409 || (e.status === 422 && /sha/i.test(e.message)))) throw e;
-    const latest = await gh(`/repos/${name}/contents/${encodePath(entry.path)}?ref=${encodeURIComponent(branch)}`);
-    const remote = parseYaml(decodeBase64(latest.content));
-    result = await put(apply(remote, true), latest.sha);
+    const latest = await readFileAt(entry.path, branch);
+    result = await put(apply(parseYaml(latest.text), true), latest.sha);
   }
   entry.sha = result.res.content.sha;
   entry.doc = parseYaml(result.text);
@@ -305,8 +318,54 @@ async function commit(entry, apply, message) {
 
 class ConflictError extends Error {}
 
-function sameFeature(a, b) {
-  return JSON.stringify(normalizeFeature(a ?? {}, state.meta)) === JSON.stringify(normalizeFeature(b ?? {}, state.meta));
+/**
+ * Commit changes to several component files as ONE commit (Git Data API).
+ * Each `apply(latestDoc)` receives the file as it is at the branch head and returns the
+ * new document, throwing ConflictError when the change no longer applies. If the branch
+ * moves before the ref update (non-fast-forward), everything is redone once from the new head.
+ */
+async function commitFiles(changes, message) {
+  const { name, branch } = repo();
+  const ref = encodePath(`heads/${branch}`);
+  for (let attempt = 0; ; attempt++) {
+    const head = (await gh(`/repos/${name}/git/ref/${ref}`)).object.sha;
+    const baseTree = (await gh(`/repos/${name}/git/commits/${head}`)).tree.sha;
+    const files = [];
+    for (const { entry, apply } of changes) {
+      const latest = await readFileAt(entry.path, head);
+      const doc = apply(parseYaml(latest.text));
+      const errors = validateComponent(doc, state.meta, entry.path.split("/").pop());
+      if (errors.length) throw Object.assign(new Error("Validation failed"), { errors });
+      const text = dumpComponent(doc, state.meta);
+      const blob = await gh(`/repos/${name}/git/blobs`, {
+        method: "POST",
+        body: { content: utf8ToBase64(text), encoding: "base64" },
+      });
+      files.push({ entry, text, sha: blob.sha });
+    }
+    const tree = await gh(`/repos/${name}/git/trees`, {
+      method: "POST",
+      body: { base_tree: baseTree, tree: files.map((f) => ({ path: f.entry.path, mode: "100644", type: "blob", sha: f.sha })) },
+    });
+    const created = await gh(`/repos/${name}/git/commits`, {
+      method: "POST",
+      body: { message, tree: tree.sha, parents: [head] },
+    });
+    try {
+      await gh(`/repos/${name}/git/refs/${ref}`, { method: "PATCH", body: { sha: created.sha, force: false } });
+    } catch (e) {
+      if (e.status === 422 && attempt === 0) continue;
+      if (e.status === 422) throw new Error("Someone else saved at the same moment — press Save again.");
+      throw e;
+    }
+    for (const f of files) {
+      f.entry.sha = f.sha;
+      f.entry.doc = parseYaml(f.text);
+      f.entry.base = clone(f.entry.doc);
+    }
+    rebuildIndex();
+    return { sha: created.sha, html_url: created.html_url };
+  }
 }
 
 // ---------------------------------------------------------------- routing
@@ -339,6 +398,7 @@ function render() {
   else view = viewOverview();
   content.innerHTML = versionBanner() + view;
   renderList();
+  renderBatchBar();
   renderDrawer(params.get("open"));
 }
 
@@ -656,16 +716,20 @@ function renderList() {
 
   const groups = columnGroups();
   const open = params.get("open");
+  const selectable = canEdit();
+  state.visibleIds = rows.map(({ f }) => f.id);
+  const selCell = (id) =>
+    selectable ? `<td class="sel"><input type="checkbox" data-select="${esc(id)}" ${state.selection.has(id) ? "checked" : ""} aria-label="Select ${esc(id)}"></td>` : "";
   let body = "";
   let lastComponent = null;
   for (const { entry, f } of rows) {
     if (inSearch && entry !== lastComponent) {
-      body += `<tr class="comp-heading"><td colspan="${3 + state.meta.columns.length}"><a href="#/c/${entry.doc.id}">${esc(entry.doc.id)} · ${esc(entry.doc.name)}</a></td></tr>`;
+      body += `<tr class="comp-heading"><td colspan="${3 + state.meta.columns.length + (selectable ? 1 : 0)}"><a href="#/c/${entry.doc.id}">${esc(entry.doc.id)} · ${esc(entry.doc.name)}</a></td></tr>`;
       lastComponent = entry;
     }
     const noteCount = Object.keys(f.notes ?? {}).length;
-    body += `<tr data-open="${esc(f.id)}" class="${open === f.id ? "selected" : ""} ${statusOf(f, state.focus) === "tbd" ? "is-open" : ""}">
-      <td class="fid">${esc(f.id)}</td>
+    body += `<tr data-open="${esc(f.id)}" class="${open === f.id ? "selected" : ""} ${statusOf(f, state.focus) === "tbd" ? "is-open" : ""} ${state.selection.has(f.id) ? "picked" : ""}">
+      ${selCell(f.id)}<td class="fid">${esc(f.id)}</td>
       <td><div class="fname">${esc(f.name)}</div>${f.label ? `<div class="flabel">${esc(f.label)}</div>` : ""}</td>
       ${groups
         .flatMap((g) => g.columns.map((col, i) => ({ col, first: i === 0 })))
@@ -679,14 +743,28 @@ function renderList() {
         .join("")}${noteCount ? `<span class="has-notes" title="${noteCount} note(s)">🗒 ${noteCount}</span>` : ""}</td>
     </tr>`;
   }
+  const allPicked = state.visibleIds.length > 0 && state.visibleIds.every((id) => state.selection.has(id));
+  const selHead = selectable
+    ? `<th class="sel"><input type="checkbox" data-select-all ${allPicked ? "checked" : ""} title="Select all visible rows" aria-label="Select all visible rows"></th>`
+    : "";
   host.innerHTML = `<table class="matrix">
     <thead>
-      <tr class="groups"><th></th><th></th>${groups.map((g) => `<th colspan="${g.columns.length}" class="grp-start">${esc(g.label)}</th>`).join("")}<th></th></tr>
-      <tr class="cols"><th>ID</th><th>Feature</th>${groups
+      <tr class="groups">${selectable ? "<th></th>" : ""}<th></th><th></th>${groups.map((g) => `<th colspan="${g.columns.length}" class="grp-start">${esc(g.label)}</th>`).join("")}<th></th></tr>
+      <tr class="cols">${selHead}<th>ID</th><th>Feature</th>${groups
         .flatMap((g) => g.columns.map((col, i) => `<th class="st ${i === 0 ? "grp-start" : ""} ${col.id === state.focus ? "focus" : ""}">${esc(col.name)}</th>`))
         .join("")}<th>Jira · Notes</th></tr>
     </thead>
     <tbody>${body}</tbody></table>`;
+  syncSelectAll();
+}
+
+/** Header checkbox: checked when every visible row is ticked, indeterminate when some are. */
+function syncSelectAll() {
+  const header = $("input[data-select-all]");
+  if (!header) return;
+  const ticked = state.visibleIds.filter((id) => state.selection.has(id)).length;
+  header.checked = ticked > 0 && ticked === state.visibleIds.length;
+  header.indeterminate = ticked > 0 && ticked < state.visibleIds.length;
 }
 
 // ---------------------------------------------------------------- drawer
@@ -867,6 +945,10 @@ function componentEditor() {
 
 function startEdit(key) {
   if (!canEdit()) return openSettings();
+  if (state.saving) {
+    toast("Wait until the current save finishes, then edit", "error");
+    return;
+  }
   const comp = componentEntry(key);
   if (comp) {
     const { features, ...header } = comp.doc;
@@ -917,7 +999,7 @@ async function saveDraft({ remove = false } = {}) {
         (doc, rebased) => {
           const index = doc.features.findIndex((f) => f.id === data.id);
           if (index < 0) throw new ConflictError(`${data.id} was removed by someone else.`);
-          if (rebased && !sameFeature(doc.features[index], original)) throw new ConflictError(`Someone else changed ${data.id} meanwhile.`);
+          if (rebased && !sameFeature(doc.features[index], original, state.meta)) throw new ConflictError(`Someone else changed ${data.id} meanwhile.`);
           if (remove) doc.features.splice(index, 1);
           else doc.features[index] = data;
           return doc;
@@ -940,6 +1022,171 @@ async function saveDraft({ remove = false } = {}) {
     }
     renderDrawer(draft.key);
   }
+}
+
+// ---------------------------------------------------------------- batch status change
+
+const BATCH_VALUES = [...STATUSES.map((s) => s.id), "unset"];
+
+function localDate() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+function batchColumn() {
+  const id = state.batch.column && state.meta.columns.some((c) => c.id === state.batch.column) ? state.batch.column : state.focus;
+  return state.meta.columns.find((c) => c.id === id);
+}
+
+function renderBatchBar() {
+  let bar = $("#batch-bar");
+  if (!canEdit() || !state.selection.size || !$("#list-host")) {
+    bar?.remove();
+    return;
+  }
+  if (!bar) {
+    bar = Object.assign(document.createElement("div"), { id: "batch-bar", className: "batch-bar" });
+    document.body.append(bar);
+  }
+  const column = batchColumn();
+  const value = state.batch.value;
+  bar.innerHTML = `
+    <strong class="batch-count">${state.selection.size} selected</strong>
+    <label class="batch-field">Set <select id="batch-column">${state.meta.columns
+      .map((c) => `<option value="${c.id}" ${c.id === column.id ? "selected" : ""}>${esc(columnTitle(c))}</option>`)
+      .join("")}</select></label>
+    <span class="seg">${BATCH_VALUES.map(
+      (v) => `<button type="button" data-batch-value="${v}" class="${v} ${v === value ? "on" : ""}" title="${esc(statusTitle(v))}">${statusLabel(v)}</button>`,
+    ).join("")}</span>
+    <textarea id="batch-note" rows="1" placeholder="Meeting note (optional) — added to the notes of every changed item">${esc(state.batch.note)}</textarea>
+    <button class="btn" data-action="batch-clear">Cancel</button>
+    <button class="btn btn-primary" data-action="batch-apply" ${value ? "" : "disabled"}>Apply &amp; save</button>`;
+}
+
+/** What the batch would do on the loaded data: per component file, and overall. */
+function batchPreview() {
+  const column = batchColumn();
+  const value = state.batch.value;
+  const options = { noteKey: column.platform || GENERAL, note: state.batch.note, date: localDate(), columnName: column.name };
+  const ids = [...state.selection];
+  const missing = ids.filter((id) => !state.index.has(id));
+  const files = [];
+  for (const entry of state.components) {
+    const mine = ids.filter((id) => state.index.get(id)?.entry === entry);
+    if (!mine.length) continue;
+    const result = applyBatch(entry.doc, mine, column.id, value, options);
+    files.push({ entry, ids: mine, ...result });
+  }
+  const changed = files.flatMap((f) => f.changed);
+  const skipped = files.flatMap((f) => f.skipped);
+  return { column, value, options, files, changed, skipped, missing };
+}
+
+function batchItemList(p) {
+  const rows = (ids, label) => ids.map((id) => {
+    const hit = state.index.get(id);
+    const old = statusOf(hit.feature, p.column.id);
+    return `<li><code>${esc(id)}</code> ${esc(hit.feature.name)}: ${label ? esc(label) : `${esc(statusLabel(old))} → ${esc(statusLabel(p.value))}`}</li>`;
+  }).join("");
+  const skippedLabel = `already ${p.value === "unset" ? "not set" : statusLabel(p.value)}`;
+  return `<details class="batch-items"><summary>Show the ${p.changed.length + p.skipped.length} selected item(s)</summary>
+    <ul>${rows(p.changed)}${rows(p.skipped, skippedLabel)}</ul></details>`;
+}
+
+function openBatchConfirm() {
+  if (state.draft) {
+    // Saving the open draft afterwards would overwrite the batch result with its stale copy.
+    toast("Save or cancel the item you are editing first, then apply the batch", "error");
+    return;
+  }
+  const p = batchPreview();
+  if (!p.changed.length) {
+    const already = p.value === "unset" ? "not set" : statusLabel(p.value);
+    const gone = p.missing.length ? `; not found: ${esc(p.missing.join(", "))}` : "";
+    toast(`Nothing to change — ${p.skipped.length} selected item(s) already ${esc(already)}${gone}`);
+    return;
+  }
+  const dialog = $("#dialog");
+  const touched = p.files.filter((f) => f.changed.length);
+  const sample = p.options.note.trim() ? `<div class="hint" style="margin-top:8px">Note added to each changed item:<br><code>${esc(`${p.options.date} · ${p.column.name}: … → ${statusLabel(p.value)} — ${p.options.note.trim()}`)}</code></div>` : "";
+  dialog.innerHTML = `<form method="dialog" id="batch-confirm">
+    <div class="dlg-head"><h2>Apply batch change</h2></div>
+    <div class="dlg-body">
+      <p style="margin-top:0">Set <strong>${esc(columnTitle(p.column))}</strong> to ${pill(p.value)} on <strong>${p.changed.length}</strong> item(s).</p>
+      <ul class="hint">
+        ${p.skipped.length ? `<li>${p.skipped.length} already ${esc(statusLabel(p.value))} — skipped</li>` : ""}
+        ${p.missing.length ? `<li>Not found (removed?): ${esc(p.missing.join(", "))}</li>` : ""}
+        <li>One commit touching ${touched.length} file(s): ${touched.map((f) => esc(`${f.entry.doc.id} ${f.entry.doc.name}`)).join(", ")}</li>
+      </ul>
+      ${batchItemList(p)}
+      ${sample}
+      <div class="errors" id="batch-error" hidden></div>
+    </div>
+    <div class="dlg-foot">
+      <button class="btn" value="cancel" formnovalidate>Back</button>
+      <button class="btn btn-primary" value="confirm" data-action="batch-confirm">Save ${p.changed.length} change(s)</button>
+    </div></form>`;
+  dialog.showModal();
+  let saving = false;
+  // While saving, Esc and Back must not close the dialog, or the outcome would never be shown.
+  dialog.oncancel = (event) => {
+    if (saving) event.preventDefault();
+  };
+  // Drop the form once the dialog closes so a stale batch can never be submitted later.
+  dialog.onclose = () => {
+    dialog.onclose = null;
+    if ($("#batch-confirm")) dialog.innerHTML = "";
+  };
+  $("#batch-confirm").addEventListener("submit", async (event) => {
+    if (event.submitter?.value !== "confirm") return;
+    event.preventDefault();
+    const button = event.submitter;
+    const back = $('#batch-confirm button[value="cancel"]');
+    saving = true;
+    state.saving = true;
+    button.disabled = true;
+    back.disabled = true;
+    button.textContent = "Saving…";
+    try {
+      const info = await saveBatch(p);
+      saving = false;
+      state.saving = false;
+      dialog.oncancel = null;
+      dialog.close();
+      state.selection.clear();
+      state.batch = { column: state.batch.column, value: null, note: "" };
+      toast(`Saved ${p.changed.length} change(s) · <a href="${esc(info.html_url)}" target="_blank" rel="noopener">${esc(info.sha.slice(0, 7))}</a>`);
+      render();
+    } catch (e) {
+      saving = false;
+      state.saving = false;
+      const box = $("#batch-error");
+      box.hidden = false;
+      box.textContent = e instanceof ConflictError ? `${e.message} Nothing was saved — reload and try again.` : (e.errors ?? [e.message]).join("; ");
+      button.disabled = false;
+      back.disabled = false;
+      button.textContent = `Save ${p.changed.length} change(s)`;
+    }
+  });
+}
+
+/** One commit for the whole batch; each file is re-applied on its latest copy. */
+async function saveBatch(p) {
+  const touched = p.files.filter((f) => f.changed.length);
+  const changes = touched.map(({ entry, ids }) => ({
+    entry,
+    apply: (latest) => {
+      const conflicts = ids.filter((id) => {
+        const loaded = entry.base.features.find((f) => f.id === id);
+        const now = latest.features.find((f) => f.id === id);
+        return !now || !sameFeature(now, loaded, state.meta);
+      });
+      if (conflicts.length) throw new ConflictError(`Changed or removed by someone else meanwhile: ${conflicts.join(", ")}.`);
+      return applyBatch(latest, ids, p.column.id, p.value, p.options).doc;
+    },
+  }));
+  const message = batchCommitMessage(columnTitle(p.column), p.value, p.changed.length);
+  return commitFiles(changes, message);
 }
 
 // ---------------------------------------------------------------- settings dialog
@@ -1167,6 +1414,45 @@ document.addEventListener("click", (event) => {
   const target = event.target;
   const action = target.closest("[data-action]")?.dataset.action;
   if (action === "close-drawer") return closeDrawer();
+
+  const pick = target.closest("input[data-select]");
+  if (pick) {
+    if (pick.checked) state.selection.add(pick.dataset.select);
+    else state.selection.delete(pick.dataset.select);
+    pick.closest("tr")?.classList.toggle("picked", pick.checked);
+    syncSelectAll();
+    renderBatchBar();
+    return;
+  }
+  if (target.closest("input[data-select-all]")) {
+    const all = state.visibleIds.every((id) => state.selection.has(id));
+    for (const id of state.visibleIds) all ? state.selection.delete(id) : state.selection.add(id);
+    for (const box of document.querySelectorAll("input[data-select]")) {
+      box.checked = state.selection.has(box.dataset.select);
+      box.closest("tr")?.classList.toggle("picked", box.checked);
+    }
+    syncSelectAll();
+    renderBatchBar();
+    return;
+  }
+  const batchValue = target.closest("[data-batch-value]");
+  if (batchValue) {
+    state.batch.value = batchValue.dataset.batchValue;
+    renderBatchBar();
+    return;
+  }
+  if (action === "batch-clear") {
+    state.selection.clear();
+    state.batch = { column: state.batch.column, value: null, note: "" };
+    for (const box of document.querySelectorAll("input[data-select]")) {
+      box.checked = false;
+      box.closest("tr")?.classList.remove("picked");
+    }
+    syncSelectAll();
+    renderBatchBar();
+    return;
+  }
+  if (action === "batch-apply") return openBatchConfirm();
   if (action === "settings") return openSettings();
   if (action === "refresh") return reload();
   if (action === "toggle-nav") return document.body.classList.toggle("nav-open");
@@ -1215,7 +1501,7 @@ document.addEventListener("click", (event) => {
   }
 
   const row = target.closest("tr[data-open]");
-  if (row && !target.closest("a")) location.hash = hrefWith({ open: row.dataset.open });
+  if (row && !target.closest("a") && !target.closest("td.sel")) location.hash = hrefWith({ open: row.dataset.open });
 });
 
 document.addEventListener("input", (event) => {
@@ -1225,6 +1511,10 @@ document.addEventListener("input", (event) => {
     if (field.startsWith("notes.")) state.draft.data.notes = { ...state.draft.data.notes, [field.slice(6)]: value };
     else state.draft.data[field] = value;
     state.draft.dirty = true;
+    return;
+  }
+  if (event.target.id === "batch-note") {
+    state.batch.note = event.target.value;
     return;
   }
   if (event.target.id === "filter-text") {
@@ -1241,6 +1531,12 @@ document.addEventListener("input", (event) => {
 });
 
 $("#focus-column").addEventListener("change", (event) => setFocus(event.target.value));
+document.addEventListener("change", (event) => {
+  if (event.target.id === "batch-column") {
+    state.batch.column = event.target.value;
+    renderBatchBar();
+  }
+});
 $("#version-select").addEventListener("change", (event) => switchVersion(event.target.value));
 
 function setFocus(column) {
