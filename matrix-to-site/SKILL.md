@@ -82,9 +82,12 @@ relative to this skill's directory; `$REPO` is the target repo, `$B` the deploy 
 8. **Commit and push** one commit to `$B` only (`git push -u origin $B`). Never
    force-push, and never push to `main`, `master` or the default branch. If the push
    is rejected for permissions, tell the user rather than retrying another way.
-9. **Check GitHub, read-only**: `python3 scripts/github_status.py <owner/name> $B`.
-   It only reads (Pages enabled? deploy rules? which branch the live site comes
-   from) and lists the manual steps still needed. A repo has **one** Pages site: if it
+9. **Check GitHub, read-only**:
+   `python3 scripts/github_status.py <owner/name> $B --wait-for $(git -C $REPO rev-parse HEAD)`.
+   It first waits for the workflow run your push started (it may already deploy the
+   site, or fail at "Deploy" until the settings exist) and reports its result, then
+   reads Pages / deploy rules / which branch the live site comes from and lists the
+   manual steps still needed. Report only what it says after the run has finished. A repo has **one** Pages site: if it
    warns that the live site comes from another branch, put that warning at the top
    of the report, because deploying `$B` replaces that site.
 10. **Report** using the template below, with only the still-needed steps from

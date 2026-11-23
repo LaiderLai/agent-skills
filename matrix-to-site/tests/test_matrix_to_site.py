@@ -1,5 +1,6 @@
 import csv
 import io
+import json
 import os
 import shutil
 import subprocess
@@ -427,6 +428,158 @@ class ScaffoldTest(unittest.TestCase):
             )
             self.assertEqual(res.returncode, 0, res.stderr)
         self.assertTrue(os.path.exists(os.path.join(self.tmp, "dist", "data.json")))
+
+
+FAKE_GH = r'''#!/usr/bin/env python3
+"""Stand-in for `gh`: answers `gh api <path>` from responses.json (a list per path, consumed in order)."""
+import json, os, sys
+state = os.path.join(os.path.dirname(os.path.abspath(__file__)), "responses.json")
+if sys.argv[1:2] == ["auth"]:
+    sys.exit(0)
+path = sys.argv[-1]
+data = json.load(open(state))
+queue = data.get(path)
+if not queue:
+    sys.stderr.write("gh: Not Found (HTTP 404)\n")
+    sys.exit(1)
+answer = queue.pop(0) if len(queue) > 1 else queue[0]
+json.dump(data, open(state, "w"))
+if answer == 404:
+    sys.stderr.write("gh: Not Found (HTTP 404)\n")
+    sys.exit(1)
+print(json.dumps(answer))
+'''
+
+
+class GithubStatusTest(unittest.TestCase):
+    """github_status.py against a fake `gh`, so no network is needed."""
+
+    REPO, BRANCH = "org/repo", "matrix-table-demo"
+    SHA = "abc1234def5678abc1234def5678abc1234def56"  # full sha of the pushed commit
+    SHORT = SHA[:7]
+
+    def run_status(self, responses, *extra):
+        with tempfile.TemporaryDirectory() as tmp:
+            gh = os.path.join(tmp, "gh")
+            with open(gh, "w") as f:
+                f.write(FAKE_GH)
+            os.chmod(gh, 0o755)
+            with open(os.path.join(tmp, "responses.json"), "w") as f:
+                json.dump(responses, f)
+            env = {**os.environ, "PATH": tmp + os.pathsep + os.environ["PATH"]}
+            return run(
+                os.path.join(SCRIPTS, "github_status.py"),
+                self.REPO,
+                self.BRANCH,
+                *extra,
+                env=env,
+            )
+
+    def base(self, deployed_ref):
+        r = f"repos/{self.REPO}"
+        return {
+            f"{r}/pages": [
+                {"build_type": "workflow", "html_url": "https://x.pages.github.io/"}
+            ],
+            f"{r}/environments/github-pages": [
+                {"name": "github-pages", "deployment_branch_policy": None}
+            ],
+            f"{r}/environments/github-pages/deployment-branch-policies": [
+                {"branch_policies": []}
+            ],
+            f"{r}/deployments?environment=github-pages&per_page=20": [
+                [
+                    {
+                        "id": 7,
+                        "ref": deployed_ref,
+                        "sha": self.SHA,
+                        "created_at": "2026-11-23T06:00:12Z",
+                    }
+                ]
+            ],
+            f"{r}/deployments/7/statuses": [[{"state": "success"}]],
+        }
+
+    def runs_path(self):
+        return f"repos/{self.REPO}/actions/runs?branch={self.BRANCH}&per_page=20"
+
+    def test_waits_for_the_push_run_before_reporting(self):
+        responses = self.base(self.BRANCH)
+        run_obj = {
+            "id": 42,
+            "name": "Matrix Site",
+            "html_url": "https://github.com/run/42",
+            "head_sha": self.SHA,
+        }
+        older = {
+            "id": 41,
+            "name": "Matrix Site",
+            "status": "completed",
+            "conclusion": "failure",
+            "head_sha": "f" * 40,
+        }
+        responses[self.runs_path()] = [
+            {"workflow_runs": [older]},
+            {
+                "workflow_runs": [
+                    {**run_obj, "status": "in_progress", "conclusion": None}
+                ]
+            },
+            {
+                "workflow_runs": [
+                    {**run_obj, "status": "completed", "conclusion": "success"}
+                ]
+            },
+        ]
+        # a short sha must work too (GitHub's head_sha filter needs the full one)
+        out = self.run_status(
+            responses, "--wait-for", self.SHORT, "--interval", "0", "--timeout", "5"
+        )
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertIn("workflow run: Matrix Site success", out.stdout)
+        self.assertIn(f"live site: deployed from {self.BRANCH}", out.stdout)
+        self.assertNotIn(
+            "3 run the first deployment", out.stdout
+        )  # already deployed by the push run
+
+    def test_reports_the_failed_job(self):
+        responses = self.base("other-branch")
+        responses[self.runs_path()] = [
+            {
+                "workflow_runs": [
+                    {
+                        "id": 43,
+                        "name": "Matrix Site",
+                        "status": "completed",
+                        "conclusion": "failure",
+                        "html_url": "https://github.com/run/43",
+                        "head_sha": self.SHA,
+                    }
+                ]
+            }
+        ]
+        responses[f"repos/{self.REPO}/actions/runs/43/jobs"] = [
+            {
+                "jobs": [
+                    {"name": "Validate and build", "conclusion": "success"},
+                    {"name": "Deploy to GitHub Pages", "conclusion": "failure"},
+                ]
+            }
+        ]
+        out = self.run_status(
+            responses, "--wait-for", self.SHA, "--interval", "0", "--timeout", "5"
+        )
+        self.assertIn("workflow run: Matrix Site failure", out.stdout)
+        self.assertIn("failed job: Deploy to GitHub Pages", out.stdout)
+        self.assertIn("3 run the first deployment", out.stdout)
+
+    def test_gives_up_when_no_run_appears(self):
+        responses = self.base(self.BRANCH)
+        responses[self.runs_path()] = [{"workflow_runs": []}]
+        out = self.run_status(
+            responses, "--wait-for", self.SHA, "--interval", "0", "--timeout", "0"
+        )
+        self.assertIn("no finished workflow run for abc1234", out.stdout)
 
 
 @unittest.skipUnless(shutil.which("node"), "node not installed")

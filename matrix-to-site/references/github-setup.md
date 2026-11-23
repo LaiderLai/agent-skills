@@ -1,7 +1,8 @@
 # GitHub setup the user does by hand
 
 The skill never changes repository settings. After pushing, run
-`python3 scripts/github_status.py OWNER/REPO BRANCH` (read-only) and give the user
+`python3 scripts/github_status.py OWNER/REPO BRANCH --wait-for <pushed sha>` (read-only;
+it waits for the push's workflow run first) and give the user
 only the steps it reports as still needed, filled in with their repo (`OWNER/REPO`)
 and deploy branch (`BRANCH`). All of them need **admin** on the repo.
 
