@@ -1,0 +1,23 @@
+title: "DEMO Matrix table"
+header_rows: 2
+jira_url: "https://example.atlassian.net/browse/"
+jira_projects: ["PROJ"]
+repository:
+  name: "example-org/example-repo"
+  branch: "matrix-table-demo"
+columns: {section: 0, component_id: 1, component: 2, label: 3, feature: 4, comment: 5, notes: 11}
+status_values: {"YES": supported, "NO": unsupported, "TBD": tbd}
+platforms:
+  - {id: "board-x", name: "Board X", hardware: "Reference board"}
+  - {id: "board-y", name: "Board Y", hardware: "Partner board"}
+status_columns:
+  - {column: 6, id: "soc", name: "SoC", group: "Supported by HW/FW"}
+  - {column: 7, id: "board-x-ea", platform: "board-x", name: "EA"}
+  - {column: 8, id: "board-x-ga", platform: "board-x", name: "GA"}
+  - {column: 9, id: "board-y-beta", platform: "board-y", name: "Beta"}
+  - {column: 10, id: "board-y-ga", platform: "board-y", name: "GA"}
+notes_markers:
+  "BoardY": "board-y"
+  "Vendor": "board-y"
+notes_head_platform: "board-x"
+notes_default_platform: "board-x"

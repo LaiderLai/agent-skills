@@ -1,6 +1,4 @@
 import {
-  STATUSES,
-  GENERAL,
   parseYaml,
   dumpComponent,
   normalizeComponent,
@@ -11,6 +9,7 @@ import {
   sameFeature,
   batchCommitMessage,
 } from "./model.js";
+import { statusSet, statusInfo, tally, noteKeyFor, noteOrder, noun, countNoun, isRequirement, testColumn, coverage, excluded, included, done, riskDone, risky, coverageLevel, riskLevel, notSupportedLevel } from "./template.js";
 
 const DEFAULT_REPO = { name: "", branch: "main", path: "matrix-table/data", tag_prefix: "matrix-table/" };
 const LS = "matrixTable.";
@@ -45,10 +44,36 @@ function esc(value) {
 }
 const clone = (value) => JSON.parse(JSON.stringify(value));
 const statusOf = (feature, column) => feature.status?.[column] || "unset";
-const statusLabel = (id) => STATUSES.find((s) => s.id === id)?.label ?? "—";
-const statusTitle = (id) => STATUSES.find((s) => s.id === id)?.title ?? "Not set";
-const pill = (id) => `<span class="pill ${id}" title="${esc(statusTitle(id))}">${statusLabel(id)}</span>`;
-const platformName = (id) => (id === GENERAL ? "General" : (state.meta.platforms.find((p) => p.id === id)?.name ?? id));
+const columnOf = (column) => (typeof column === "string" ? state.meta.columns.find((c) => c.id === column) : column);
+const setOf = (column) => statusSet(state.meta, columnOf(column));
+const openIds = (column) => setOf(column).filter((s) => !s.resolved).map((s) => s.id);
+const notDoneIds = (column) => [...openIds(column), "unset"];
+const statusLabel = (column, value) => statusInfo(state.meta, columnOf(column), value).label;
+const statusTitle = (column, value) => statusInfo(state.meta, columnOf(column), value).title;
+const pill = (column, value) => {
+  const info = statusInfo(state.meta, columnOf(column), value);
+  return `<span class="pill ${info.cls}" title="${esc(info.title)}">${esc(info.label)}</span>`;
+};
+const isReq = () => isRequirement(state.meta);
+const word = (n) => noun(state.meta, n);
+const cap = (text) => text.charAt(0).toUpperCase() + text.slice(1);
+const filterFields = () => (isReq() ? (state.meta.fields ?? []).filter((f) => f.filter && f.type === "enum") : []);
+const fieldFilters = (params = route().params) => Object.fromEntries(filterFields().map((f) => [f.id, params.get(f.id) ?? ""]));
+const tableFields = () => (isReq() ? (state.meta.fields ?? []).filter((f) => f.show === "table") : []);
+const keepQuery = () => {
+  const params = new URLSearchParams();
+  for (const [id, value] of Object.entries(fieldFilters())) if (value) params.set(id, value);
+  return params.toString();
+};
+const fieldValue = (f, item) => {
+  const v = item.fields?.[f.id];
+  if (v === undefined || v === null || v === "") return "";
+  return f.type === "enum" ? (f.values?.find((x) => x.id === v)?.label ?? v) : Array.isArray(v) ? v.join(", ") : String(v);
+};
+const platformName = (id) => (state.meta.platforms.find((p) => p.id === id)?.name ?? id);
+const noteName = (key) => state.meta.note_keys?.find((k) => k.id === key)?.name ?? platformName(key);
+const isDefaultColumn = (column) => !columnOf(column)?.status_set || columnOf(column).status_set === "default";
+const TONE_BAR = { yes: "var(--yes-bar)", no: "var(--no-bar)", open: "var(--tbd-bar)", neutral: "var(--tone-neutral-bar)", info: "var(--tone-info-bar)", warn: "var(--tone-warn-bar)" };
 const sectionOf = (componentId) => state.meta.sections.find((s) => s.id === componentId.split(".")[0]);
 const componentEntry = (id) => state.components.find((c) => c.doc.id === id);
 const canEdit = () => state.source === "live" && state.settings.token && !state.version;
@@ -68,10 +93,10 @@ function repo() {
 }
 
 function counts(features, column = state.focus) {
-  const out = { supported: 0, tbd: 0, unsupported: 0, unset: 0 };
-  for (const feature of features) out[statusOf(feature, column)]++;
-  return out;
+  return tally(isReq() ? included(features, state.meta) : features, state.meta, columnOf(column));
 }
+const notDone = (c) => c.open + c.unset;
+const isExcluded = (item) => isReq() && excluded(state.meta, item);
 
 function allFeatures() {
   return state.components.flatMap((entry) => entry.doc.features);
@@ -271,8 +296,9 @@ async function load() {
   }
   rebuildIndex();
   const columns = state.meta.columns.map((c) => c.id);
-  if (!columns.includes(state.focus)) {
-    state.focus = [...columns].reverse().find((id) => allFeatures().some((f) => f.status?.[id])) ?? columns[0];
+  if (!columns.includes(state.focus) || state.meta.columns.find((c) => c.id === state.focus)?.role === "test") {
+    const candidates = state.meta.columns.filter((c) => c.role !== "test").map((c) => c.id);
+    state.focus = [...candidates].reverse().find((id) => allFeatures().some((f) => f.status?.[id])) ?? candidates[0] ?? columns[0];
   }
 }
 
@@ -469,33 +495,41 @@ function versionBanner() {
   </div>`;
 }
 
-function countBadges(c, { hideZero = true } = {}) {
-  return `<span class="counts">${STATUSES.map((s) =>
-    hideZero && !c[s.id] ? "" : `<span class="count ${s.id}" title="${s.label}: ${esc(s.title)}">${c[s.id]}</span>`,
+function countBadges(c, column = state.focus, { hideZero = true } = {}) {
+  return `<span class="counts">${setOf(column).map((s) =>
+    hideZero && !c.values[s.id] ? "" : `<span class="count ${statusInfo(state.meta, columnOf(column), s.id).cls}" title="${esc(s.label)}: ${esc(s.title)}">${c.values[s.id]}</span>`,
   ).join("")}</span>`;
 }
 
 // What still needs attention: open (TBD) items first, then items with no status yet.
-function openBadge(c) {
-  if (c.tbd) return `<span class="count tbd" title="${c.tbd} open (TBD)">${c.tbd}</span>`;
+function openBadge(c, column = state.focus) {
+  if (isReq()) {
+    return notDone(c) ? `<span class="count tone-open" title="${notDone(c)} not done">${notDone(c)}</span>` : `<span class="done" title="All done">✓</span>`;
+  }
+  if (c.open) return isDefaultColumn(column)
+    ? `<span class="count tbd" title="${c.open} open (TBD)">${c.open}</span>`
+    : `<span class="count tone-open" title="${c.open} open">${c.open}</span>`;
   if (c.unset) return `<span class="count unset" title="${c.unset} not set">${c.unset}</span>`;
   return `<span class="done" title="All resolved">✓</span>`;
 }
 
-const resolvedOf = (c) => c.supported + c.unsupported;
-const totalOf = (c) => c.supported + c.unsupported + c.tbd + c.unset;
+const resolvedOf = (c) => c.resolved;
+const totalOf = (c) => c.total;
 
 function renderSidebar(parts) {
-  const tbd = counts(allFeatures()).tbd;
+  const all = counts(allFeatures());
+  const open = isReq() ? notDone(all) : all.open;
+  const dflt = isDefaultColumn(state.focus);
+  const openStatus = isReq() ? "notdone" : (openIds(state.focus)[0] ?? "unset");
   let html = `
     <a class="nav-home ${parts.length === 0 ? "active" : ""}" href="#/">◎ Overview</a>
-    <a class="nav-home ${parts[0] === "search" ? "active" : ""}" href="#/search?status=tbd">◔ Open items (TBD) <span class="counts" style="margin-left:auto"><span class="count tbd">${tbd}</span></span></a>`;
+    <a class="nav-home ${parts[0] === "search" ? "active" : ""}" href="#/search?status=${openStatus}${keepQuery() ? `&${keepQuery()}` : ""}">◔ ${isReq() ? "Not done" : "Open items"}${dflt ? " (TBD)" : ""} <span class="counts" style="margin-left:auto"><span class="count ${dflt ? "tbd" : "tone-open"}">${open}</span></span></a>`;
   for (const section of state.meta.sections) {
     const entries = state.components.filter((e) => e.doc.id.split(".")[0] === section.id);
     html += `<div class="nav-section"><h4>${esc(section.id)} · ${esc(section.name)}</h4>`;
     for (const entry of entries) {
       const active = parts[0] === "c" && parts[1] === entry.doc.id;
-      html += `<a class="nav-item ${active ? "active" : ""}" href="#/c/${entry.doc.id}">
+      html += `<a class="nav-item ${active ? "active" : ""}" href="#/c/${entry.doc.id}${keepQuery() ? `?${keepQuery()}` : ""}">
         <span class="nav-id">${esc(entry.doc.id)}</span><span class="nav-name">${esc(entry.doc.name)}</span>${openBadge(counts(entry.doc.features))}</a>`;
     }
     html += `</div>`;
@@ -505,17 +539,18 @@ function renderSidebar(parts) {
 
 // ---------------------------------------------------------------- overview
 
-function donut(c, size = 92) {
+function donut(c, column, size = 92) {
   const total = totalOf(c) || 1;
   const r = 38;
   const len = 2 * Math.PI * r;
   let offset = 0;
-  const colors = { supported: "var(--yes-bar)", unsupported: "var(--no-bar)", tbd: "var(--tbd-bar)" };
-  const arcs = Object.entries(colors)
-    .map(([key, color]) => {
-      const part = (c[key] / total) * len;
+  const arcs = setOf(column)
+    .map((s) => {
+      const key = s.id;
+      const color = TONE_BAR[s.tone];
+      const part = (c.values[key] / total) * len;
       const arc = `<circle r="${r}" cx="50" cy="50" fill="none" stroke="${color}" stroke-width="13"
-        stroke-dasharray="${part} ${len - part}" stroke-dashoffset="${-offset}" transform="rotate(-90 50 50)"><title>${statusLabel(key)}: ${c[key]}</title></circle>`;
+        stroke-dasharray="${part} ${len - part}" stroke-dashoffset="${-offset}" transform="rotate(-90 50 50)"><title>${esc(s.label)}: ${c.values[key]}</title></circle>`;
       offset += part;
       return arc;
     })
@@ -524,14 +559,41 @@ function donut(c, size = 92) {
   return `<svg width="${size}" height="${size}" viewBox="0 0 100 100">
     <circle r="${r}" cx="50" cy="50" fill="none" stroke="var(--unset)" stroke-width="13"/>${arcs}
     <text x="50" y="52" text-anchor="middle" font-size="19" fill="currentColor" font-weight="500">${pct}%</text>
-    <text x="50" y="66" text-anchor="middle" font-size="9" fill="currentColor" opacity="0.6">resolved</text></svg>`;
+    <text x="50" y="66" text-anchor="middle" font-size="9" fill="currentColor" opacity="0.6">${isReq() ? "done" : "resolved"}</text></svg>`;
 }
 
-function openLine(c) {
-  if (c.tbd) return `<span class="open-line"><span class="count tbd">${c.tbd}</span> open</span>`;
+function openLine(c, column = state.focus) {
+  if (isReq()) {
+    if (!notDone(c)) return `<span class="open-line"><span class="done">✓</span> all done</span>`;
+    return `<span class="open-line muted">${notDone(c)} not done</span>`;
+  }
+  if (c.open) return `<span class="open-line"><span class="count ${isDefaultColumn(column) ? "tbd" : "tone-open"}">${c.open}</span> open</span>`;
   if (c.unset === totalOf(c)) return `<span class="open-line muted">not set</span>`;
   if (c.unset) return `<span class="open-line muted">${c.unset} not set</span>`;
   return `<span class="open-line"><span class="done">✓</span> all resolved</span>`;
+}
+
+const levelClass = (level) => (level ? ` level-${level}` : "");
+const levelMark = (level) => (level && level !== "green" ? "⚠ " : "");
+
+function requirementCards(features) {
+  if (!state.meta.fields?.length) return "";
+  const cov = coverage(features, state.meta);
+  const focus = columnOf(state.focus);
+  const rd = riskDone(features, state.meta, focus);
+  const covLevel = coverageLevel(cov);
+  const rdLevel = riskLevel(rd);
+  return `${testColumn(state.meta) ? `<a class="card stat coverage${levelClass(covLevel)}" href="#/search">
+        <div class="stat-num">${cov.pct}<small>%</small></div>
+        <div class="stat-label">${levelMark(covLevel)}Test coverage</div>
+        <div class="stat-sub">YES ${cov.yes} · NO ${cov.no} · TBD ${cov.tbd} · not set ${cov.unset}</div>
+        <div class="stat-sub">of ${cov.total} ${word(cov.total)}</div>
+      </a>` : ""}
+      <a class="card stat risk${levelClass(rdLevel)}" href="#/search?risk=risky">
+        <div class="stat-num">${rd.done} / ${rd.total}</div>
+        <div class="stat-label">${levelMark(rdLevel)}Risk</div>
+        <div class="stat-sub">${rd.pct}% of risky ${word(2)} done on ${esc(focus.name)}</div>
+      </a>`;
 }
 
 function viewOverview() {
@@ -539,8 +601,13 @@ function viewOverview() {
   const c = counts(features);
   const focus = state.meta.columns.find((col) => col.id === state.focus);
   const total = totalOf(c) || 1;
+  const dflt = isDefaultColumn(focus);
+  const req = isReq();
+  const listed = req ? included(features, state.meta).length : features.length;
 
   const platformCards = columnGroups()
+    .map((group) => ({ ...group, columns: group.columns.filter((col) => col.role !== "test") }))
+    .filter((group) => group.columns.length)
     .map((group) => {
       const platform = state.meta.platforms.find((p) => p.id === group.platform);
       const notes = state.meta.sections
@@ -554,10 +621,10 @@ function viewOverview() {
           .map((col) => {
             const cc = counts(features, col.id);
             return `<div class="donut ${col.id === state.focus ? "focused" : ""}" data-focus="${col.id}" title="Focus on ${esc(columnTitle(col))}">
-              ${donut(cc)}
+              ${donut(cc, col)}
               <span class="donut-name">${esc(col.name)}</span>
-              ${openLine(cc)}
-              <span class="hint">YES ${cc.supported} · NO ${cc.unsupported}</span>
+              ${openLine(cc, col)}
+              <span class="hint">${setOf(col).filter((s) => s.resolved).map((s) => `${esc(s.label)} ${cc.values[s.id]}`).join(" · ")}</span>
             </div>`;
           })
           .join("")}</div>
@@ -573,13 +640,13 @@ function viewOverview() {
       const rows = entries
         .map((entry) => {
           const cc = counts(entry.doc.features);
-          const n = entry.doc.features.length || 1;
-          return `<a class="comp-row ${cc.tbd ? "has-open" : ""}" href="#/c/${entry.doc.id}">
+          const n = cc.total || 1;
+          return `<a class="comp-row ${(req ? notDone(cc) : cc.open) ? "has-open" : ""}" href="#/c/${entry.doc.id}">
             <span class="cid">${esc(entry.doc.id)}</span>
             <span class="cname">${esc(entry.doc.name)}</span>
             <span class="cdesc" title="${esc(entry.doc.description)}">${esc(entry.doc.description ?? "")}</span>
-            <span class="bar">${STATUSES.map((s) => `<span class="${s.id}" style="width:${(cc[s.id] / n) * 100}%"></span>`).join("")}</span>
-            <span class="comp-status"><span class="hint">${resolvedOf(cc)}/${entry.doc.features.length}</span>${openBadge(cc)}</span>
+            <span class="bar">${setOf(state.focus).map((s) => `<span class="${statusInfo(state.meta, columnOf(state.focus), s.id).cls}" style="width:${(cc.values[s.id] / n) * 100}%"></span>`).join("")}</span>
+            <span class="comp-status"><span class="hint">${resolvedOf(cc)}/${cc.total}</span>${openBadge(cc)}</span>
           </a>`;
         })
         .join("");
@@ -595,7 +662,7 @@ function viewOverview() {
     <div class="page-head">
       <div>
         <h1>${esc(state.meta.title)}</h1>
-        <div class="sub">${features.length} features in ${state.components.length} components · counts below are for
+        <div class="sub">${listed} ${countNoun(state.meta, listed)} in ${state.components.length} components · counts below are for
           <strong>${esc(columnTitle(focus))}</strong></div>
       </div>
       <div class="actions">
@@ -604,35 +671,50 @@ function viewOverview() {
       </div>
     </div>
     <div class="grid stats">
-      <a class="card stat open" href="#/search?status=tbd">
-        <div class="stat-num">${c.tbd}</div>
+      ${req ? `<a class="card stat done" href="#/search">
+        <div class="stat-num">${Math.round((resolvedOf(c) / total) * 100)}<small>%</small></div>
+        <div class="stat-label">Done</div>
+        <div class="stat-sub">${resolvedOf(c)} of ${totalOf(c)} ${word(totalOf(c))}</div>
+      </a>` : dflt ? `<a class="card stat open" href="#/search?status=tbd">
+        <div class="stat-num">${c.open}</div>
         <div class="stat-label">Open · TBD</div>
         <div class="stat-sub">Not yet verified or still under discussion</div>
-      </a>
-      <a class="card stat resolved" href="#/search">
+      </a>` : `<a class="card stat open" href="#/search?status=${openIds(state.focus)[0] ?? "unset"}">
+        <div class="stat-num">${c.open}</div>
+        <div class="stat-label">Open</div>
+        <div class="stat-sub">Not yet resolved</div>
+      </a>`}
+      ${req ? "" : `<a class="card stat resolved" href="#/search">
         <div class="stat-num">${Math.round((resolvedOf(c) / total) * 100)}<small>%</small></div>
         <div class="stat-label">Resolved</div>
-        <div class="stat-sub">${resolvedOf(c)} of ${totalOf(c)} decided (YES or NO)</div>
-      </a>
-      <a class="card stat supported" href="#/search?status=supported">
-        <div class="stat-num">${c.supported}</div>
+        <div class="stat-sub">${resolvedOf(c)} of ${totalOf(c)} ${dflt ? "decided (YES or NO)" : "resolved"}</div>
+      </a>`}
+      ${dflt ? `<a class="card stat supported" href="#/search?status=supported">
+        <div class="stat-num">${c.values.supported}</div>
         <div class="stat-label">YES</div>
         <div class="stat-sub">Supported / in scope</div>
       </a>
       <a class="card stat unsupported" href="#/search?status=unsupported">
-        <div class="stat-num">${c.unsupported}</div>
+        <div class="stat-num">${c.values.unsupported}</div>
         <div class="stat-label">NO</div>
         <div class="stat-sub">Not supported / out of scope</div>
-      </a>
-      ${c.unset ? `<a class="card stat unset" href="#/search?status=unset"><div class="stat-num">${c.unset}</div><div class="stat-label">Not set</div><div class="stat-sub">No status for this milestone</div></a>` : ""}
+      </a>` : setOf(state.focus).map((s) => {
+        const lv = req && s.id === "not-supported" ? notSupportedLevel(c.values[s.id]) : null;
+        return `<a class="card stat ${statusInfo(state.meta, focus, s.id).cls}${levelClass(lv)}" href="#/search?status=${esc(s.id)}">
+        <div class="stat-num">${c.values[s.id]}</div>
+        <div class="stat-label">${levelMark(lv)}${esc(s.label)}</div>
+        <div class="stat-sub">${esc(s.title)}</div>
+      </a>`;
+      }).join("")}
+      ${isReq() ? `${requirementCards(features)}\n      ` : ""}${c.unset ? `<a class="card stat unset" href="#/search?status=unset"><div class="stat-num">${c.unset}</div><div class="stat-label">Not set</div><div class="stat-sub">No status for this ${req ? "phase" : "milestone"}</div></a>` : ""}
     </div>
     <div class="grid platforms">${platformCards}</div>
     <div class="legend" style="margin:-8px 0 24px">
-      <span><i style="background:var(--yes-bar)"></i><b>YES</b> resolved – supported / in scope</span>
+      ${dflt ? `<span><i style="background:var(--yes-bar)"></i><b>YES</b> resolved – supported / in scope</span>
       <span><i style="background:var(--no-bar)"></i><b>NO</b> resolved – not supported / out of scope</span>
-      <span><i style="background:var(--tbd-bar)"></i><b>TBD</b> open – not yet verified / under discussion</span>
+      <span><i style="background:var(--tbd-bar)"></i><b>TBD</b> open – not yet verified / under discussion</span>` : setOf(focus).map((s) => `<span><i style="background:${TONE_BAR[s.tone]}"></i><b>${esc(s.label)}</b> ${req ? (s.resolved ? "done" : "not done") : s.resolved ? "resolved" : "open"} – ${esc(s.title)}</span>`).join("\n      ")}
       <span><i style="background:var(--unset)"></i>Not set</span>
-      <span>· Click a chart to change the focus milestone.</span>
+      <span>· Click a chart to change the focus ${req ? "phase" : "milestone"}.</span>
     </div>
     ${sections}`;
 }
@@ -644,7 +726,7 @@ function viewComponent(id) {
   const doc = entry.doc;
   const section = sectionOf(id);
   const notes = Object.entries(doc.notes ?? {})
-    .map(([key, text]) => `<div class="note-card"><header>${esc(platformName(key))}</header><pre>${linkify(text)}</pre></div>`)
+    .map(([key, text]) => `<div class="note-card"><header>${esc(noteName(key))}</header><pre>${linkify(text)}</pre></div>`)
     .join("");
   return `
     <div class="crumbs"><a href="#/">Overview</a> / ${esc(section?.name ?? "")}</div>
@@ -655,7 +737,7 @@ function viewComponent(id) {
       </div>
       <div class="actions">
         <a class="btn" href="${hrefWith({ open: doc.id })}">ⓘ Component info</a>
-        ${canEdit() ? `<a class="btn btn-primary" href="${hrefWith({ open: `new:${doc.id}` })}">＋ Add feature</a>` : ""}
+        ${canEdit() ? `<a class="btn btn-primary" href="${hrefWith({ open: `new:${doc.id}` })}">＋ Add ${word(1)}</a>` : ""}
       </div>
     </div>
     ${notes ? `<div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(280px,1fr));margin-bottom:12px">${notes}</div>` : ""}
@@ -673,7 +755,7 @@ function viewSearch(params) {
     <div class="crumbs"><a href="#/">Overview</a> / Search</div>
     <div class="page-head">
       <div>
-        <h1>${q ? `Results for “${esc(q)}”` : state.filter.status ? `${esc(statusLabel(state.filter.status))} features` : "All features"}</h1>
+        <h1>${q ? `Results for “${esc(q)}”` : state.filter.status ? `${esc(state.filter.status === "notdone" ? "Not done" : statusLabel(state.focus, state.filter.status))} ${word(2)}` : `All ${word(2)}`}</h1>
         <div class="sub">Status filter applies to <strong>${esc(columnTitle(state.meta.columns.find((c) => c.id === state.focus)))}</strong>.</div>
       </div>
     </div>
@@ -683,7 +765,9 @@ function viewSearch(params) {
 
 function matches(entry, feature, text) {
   if (!text) return true;
-  const hay = [feature.id, feature.name, feature.label, feature.comment, entry.doc.name, ...Object.values(feature.notes ?? {})]
+  const gone = isExcluded(feature);
+  const extra = isReq() ? (state.meta.fields ?? []).filter((f) => f.type !== "enum" && (!gone || keptWhenExcluded(f))).map((f) => fieldValue(f, feature)) : [];
+  const hay = [feature.id, feature.name, ...(isReq() ? [] : [feature.label]), feature.comment, entry.doc.name, ...(gone ? [] : Object.values(feature.notes ?? {})), ...extra]
     .join("\n")
     .toLowerCase();
   return text
@@ -701,41 +785,74 @@ function renderList() {
   const text = inSearch ? (params.get("q") ?? "") : state.filter.text;
   const entries = inSearch ? state.components : [componentEntry(parts[1])];
 
-  const textMatched = entries.flatMap((entry) => entry.doc.features.filter((f) => matches(entry, f, text)).map((f) => ({ entry, f })));
+  const filters = fieldFilters(params);
+  const exField = isReq() ? state.meta.exclude_when?.field : null;
+  const fieldHit = (f, id, v) => (id === "risk" && v === "risky" ? f.fields?.risk !== "none" : f.fields?.[id] === v);
+  // An excluded item is listed only when no filter other than its own exclusion value is active.
+  const passes = (f, skip) =>
+    Object.entries(filters).every(([id, v]) => id === skip || !v || (isExcluded(f) ? id === exField && fieldHit(f, id, v) : fieldHit(f, id, v)));
+  const textAll = entries.flatMap((entry) => entry.doc.features.filter((f) => matches(entry, f, text)).map((f) => ({ entry, f })));
+  const textMatched = textAll.filter(({ f }) => passes(f));
   const c = counts(textMatched.map((x) => x.f));
   const chip = (key, label, n) =>
-    `<button class="chip ${state.filter.status === key ? "active" : ""}" data-status-filter="${key}">${label}<span class="n">${n}</span></button>`;
-  const chipOrder = ["tbd", "supported", "unsupported"].map((id) => STATUSES.find((s) => s.id === id));
-  $("#chips-host").innerHTML = `<span class="chips">${chip("", "All", textMatched.length)}${chipOrder.map((s) => chip(s.id, s.label, c[s.id])).join("")}${chip("unset", "Not set", c.unset)}</span>`;
+    `<button class="chip ${state.filter.status === key ? "active" : ""}" data-status-filter="${esc(key)}">${esc(label)}<span class="n">${n}</span></button>`;
+  const set = setOf(state.focus);
+  const notDoneChip = isReq() ? chip("notdone", "Not done", notDone(c)) : "";
+  const chipOrder = isDefaultColumn(state.focus) ? ["tbd", "supported", "unsupported"].map((id) => set.find((s) => s.id === id)) : [...set.filter((s) => !s.resolved), ...set.filter((s) => s.resolved)];
+  const fieldChips = filterFields()
+    .map((fld) => {
+      const pool = textAll.filter(({ f }) => passes(f, fld.id) && (!isExcluded(f) || (fld.id === exField && !state.filter.status)));
+      const one = (value, label, n) =>
+        `<button class="chip ${filters[fld.id] === value ? "active" : ""}" data-field-filter="${esc(fld.id)}" data-value="${esc(value)}">${esc(label)}<span class="n">${n}</span></button>`;
+      return `<span class="chips" data-chips="${esc(fld.id)}"><span class="chips-label">${esc(fld.name)}</span>${one("", "All", textAll.filter(({ f }) => passes(f, fld.id) && (!isExcluded(f) || !state.filter.status)).length)}${(fld.values ?? []).map((v) => one(v.id, v.label, pool.filter(({ f }) => f.fields?.[fld.id] === v.id).length)).join("")}${fld.id === "risk" ? one("risky", "Risky", pool.filter(({ f }) => fieldHit(f, "risk", "risky")).length) : ""}</span>`;
+    })
+    .join("");
+  $("#chips-host").innerHTML = `<span class="chips">${chip("", "All", textMatched.length)}${chipOrder.map((s) => chip(s.id, s.label, c.values[s.id])).join("")}${chip("unset", "Not set", c.unset)}${notDoneChip}</span>${fieldChips}`;
 
-  const rows = textMatched.filter(({ f }) => !state.filter.status || statusOf(f, state.focus) === state.filter.status);
+  const statusPass = (f) => {
+    const want = state.filter.status;
+    if (!want) return true;
+    if (isExcluded(f)) return false;
+    return want === "notdone" ? notDoneIds(state.focus).includes(statusOf(f, state.focus)) : statusOf(f, state.focus) === want;
+  };
+  const rows = textMatched.filter(({ f }) => statusPass(f));
   if (!rows.length) {
-    host.innerHTML = `<div class="empty">No matching features.</div>`;
+    host.innerHTML = `<div class="empty">No matching ${word(2)}.</div>`;
     return;
   }
 
   const groups = columnGroups();
   const open = params.get("open");
   const selectable = canEdit();
-  state.visibleIds = rows.map(({ f }) => f.id);
+  state.visibleIds = rows.filter(({ f }) => !isExcluded(f)).map(({ f }) => f.id);
   const selCell = (id) =>
     selectable ? `<td class="sel"><input type="checkbox" data-select="${esc(id)}" ${state.selection.has(id) ? "checked" : ""} aria-label="Select ${esc(id)}"></td>` : "";
   let body = "";
   let lastComponent = null;
   for (const { entry, f } of rows) {
     if (inSearch && entry !== lastComponent) {
-      body += `<tr class="comp-heading"><td colspan="${3 + state.meta.columns.length + (selectable ? 1 : 0)}"><a href="#/c/${entry.doc.id}">${esc(entry.doc.id)} · ${esc(entry.doc.name)}</a></td></tr>`;
+      body += `<tr class="comp-heading"><td colspan="${3 + tableFields().length + state.meta.columns.length + (selectable ? 1 : 0)}"><a href="#/c/${entry.doc.id}${keepQuery() ? `?${keepQuery()}` : ""}">${esc(entry.doc.id)} · ${esc(entry.doc.name)}</a></td></tr>`;
       lastComponent = entry;
     }
+    if (isExcluded(f)) {
+      const exField = state.meta.exclude_when.field;
+      body += `<tr data-open="${esc(f.id)}" class="excluded ${open === f.id ? "selected" : ""}">
+      ${selectable ? `<td class="sel"></td>` : ""}<td class="fid">${esc(f.id)}</td>
+      <td><div class="fname">${esc(f.name)}</div>${f.label && !isReq() ? `<div class="flabel">${esc(f.label)}</div>` : ""}</td>
+      ${tableFields().map((fld) => `<td class="ffield">${fld.id === exField ? esc(fieldValue(fld, f)) : ""}</td>`).join("")}<td class="ex-note grp-start" colspan="${state.meta.columns.length + 1}">Out of scope</td>
+    </tr>`;
+      continue;
+    }
     const noteCount = Object.keys(f.notes ?? {}).length;
-    body += `<tr data-open="${esc(f.id)}" class="${open === f.id ? "selected" : ""} ${statusOf(f, state.focus) === "tbd" ? "is-open" : ""} ${state.selection.has(f.id) ? "picked" : ""}">
+    body += `<tr data-open="${esc(f.id)}" class="${open === f.id ? "selected" : ""} ${(isReq() ? notDoneIds(state.focus) : openIds(state.focus)).includes(statusOf(f, state.focus)) ? "is-open" : ""} ${state.selection.has(f.id) ? "picked" : ""}">
       ${selCell(f.id)}<td class="fid">${esc(f.id)}</td>
-      <td><div class="fname">${esc(f.name)}</div>${f.label ? `<div class="flabel">${esc(f.label)}</div>` : ""}</td>
-      ${groups
+      <td><div class="fname">${esc(f.name)}</div>${f.label && !isReq() ? `<div class="flabel">${esc(f.label)}</div>` : ""}</td>
+      ${tableFields().map((fld) => `<td class="ffield ${f.fields?.[fld.id] ? `${esc(fld.id)}-${esc(f.fields[fld.id])}` : ""}">${esc(fieldValue(fld, f))}</td>`).join("")}${groups
         .flatMap((g) => g.columns.map((col, i) => ({ col, first: i === 0 })))
         .map(({ col, first }) => {
           const s = statusOf(f, col.id);
-          return `<td class="st ${first ? "grp-start" : ""} ${col.id === state.focus ? "focus" : ""}">${pill(s)}</td>`;
+          const cell = pill(col, s);
+          return `<td class="st ${first ? "grp-start" : ""} ${col.id === state.focus ? "focus" : ""}">${cell}</td>`;
         })
         .join("")}
       <td class="extra">${featureJira(f)
@@ -749,8 +866,8 @@ function renderList() {
     : "";
   host.innerHTML = `<table class="matrix">
     <thead>
-      <tr class="groups">${selectable ? "<th></th>" : ""}<th></th><th></th>${groups.map((g) => `<th colspan="${g.columns.length}" class="grp-start">${esc(g.label)}</th>`).join("")}<th></th></tr>
-      <tr class="cols">${selHead}<th>ID</th><th>Feature</th>${groups
+      <tr class="groups">${selectable ? "<th></th>" : ""}<th></th><th></th>${tableFields().map(() => "<th></th>").join("")}${groups.map((g) => `<th colspan="${g.columns.length}" class="grp-start">${esc(g.label)}</th>`).join("")}<th></th></tr>
+      <tr class="cols">${selHead}<th>ID</th><th>${cap(word(1))}</th>${tableFields().map((fld) => `<th>${esc(fld.name)}</th>`).join("")}${groups
         .flatMap((g) => g.columns.map((col, i) => `<th class="st ${i === 0 ? "grp-start" : ""} ${col.id === state.focus ? "focus" : ""}">${esc(col.name)}</th>`))
         .join("")}<th>Jira · Notes</th></tr>
     </thead>
@@ -783,7 +900,7 @@ function renderDrawer(key) {
     const entry = componentEntry(key.slice(4));
     if (!entry || !canEdit()) return closeDrawer();
     if (state.draft?.key !== key) {
-      state.draft = { key, kind: "feature", isNew: true, entry, data: { id: nextFeatureId(entry.doc), name: "", status: {}, notes: {} } };
+      state.draft = { key, kind: "feature", isNew: true, entry, data: { id: isReq() ? "" : nextFeatureId(entry.doc), name: "", status: {}, ...(isReq() ? { fields: {} } : {}), notes: {} } };
     }
     drawer.innerHTML = featureEditor();
     return;
@@ -796,7 +913,7 @@ function renderDrawer(key) {
   }
   const hit = state.index.get(key);
   if (!hit) {
-    drawer.innerHTML = `<div class="drawer-body empty">Feature ${esc(key)} not found.</div>`;
+    drawer.innerHTML = `<div class="drawer-body empty">${cap(word(1))} ${esc(key)} not found.</div>`;
     return;
   }
   drawer.innerHTML = state.draft?.key === key ? featureEditor() : featureView(hit);
@@ -819,11 +936,60 @@ function drawerHead(entry, title, tags = "") {
   </div>`;
 }
 
-function notesCards(notes) {
-  return Object.entries(notes ?? {})
+function fieldHtml(fld, item) {
+  const v = item.fields?.[fld.id];
+  if (fld.type === "list") {
+    const links = (Array.isArray(v) ? v : []).map((x) => (fld.link === "jira" && state.meta.jira_url ? `<a class="jira" href="${esc(state.meta.jira_url + x)}" target="_blank" rel="noopener">${esc(x)}</a>` : esc(x)));
+    return links.join(" ");
+  }
+  if (fld.type === "text") return linkify(v ?? "");
+  return esc(fieldValue(fld, item));
+}
+
+function requirementBody(feature) {
+  const all = state.meta.fields ?? [];
+  const exField = state.meta.exclude_when?.field;
+  const blockFields = (name) => all.filter((f) => f.block === name);
+  const row = (f, hideEmpty = false) => {
+    const empty = fieldValue(f, feature) === "";
+    return hideEmpty && empty ? "" : `<div class="field-label">${esc(f.name)}</div><div class="prose">${empty ? `<span class="muted">—</span>` : fieldHtml(f, feature)}</div>`;
+  };
+  const section = (id, title, inner) => `<section class="drawer-block" data-block="${id}"><h3 class="block-title">${esc(title)}</h3>${inner}</section>`;
+  const reqFields = all.filter((f) => !f.block && (f.show === "detail" || f.id === exField));
+  const requirements = section("requirements", "Requirements",
+    `${feature.comment ? `<div class="field-label">Description / comment</div><div class="prose">${linkify(feature.comment)}</div>` : ""}${reqFields.map((f) => row(f)).join("")}`);
+  if (isExcluded(feature)) return requirements;
+  const notes = (...keys) => notesCards(Object.fromEntries(keys.filter((k) => feature.notes?.[k]).map((k) => [k, feature.notes[k]])));
+  const phases = state.meta.columns.filter((c) => c.role !== "test");
+  const tests = state.meta.columns.filter((c) => c.role === "test");
+  const plan = blockFields("test-plan").filter((f) => fieldValue(f, feature) !== "");
+  const phasePill = (c) => `<div class="exec-phase"><div class="hint">${esc(c.name)}</div>${pill(c, statusOf(feature, c.id))}</div>`;
+  const discovery = section("discovery", "Discovery", blockFields("discovery").map((f) => row(f)).join("") + notes("discovery"));
+  const execution = section("execution", "Project execution",
+    `<div class="exec-phases">${phases.map(phasePill).join("")}</div>${notes(...phases.map((c) => noteKeyFor(c, state.meta)))}${blockFields("execution").map((f) => row(f)).join("")}`);
+  const testPlan = section("test-plan", "Test plan",
+    `<div class="exec-phases">${tests.map(phasePill).join("")}</div>${plan.length ? `<div class="test-plan card card-pad">${plan.map((f) => `<div class="tp-row"><div class="hint">${esc(f.name)}</div><div class="prose">${fieldHtml(f, feature)}</div></div>`).join("")}</div>` : ""}${notes(...tests.map((c) => noteKeyFor(c, state.meta)))}`);
+  return requirements + discovery + execution + testPlan;
+}
+
+function notesCards(notes, ordered = false) {
+  let entries = Object.entries(notes ?? {});
+  if (ordered) {
+    const order = noteOrder(state.meta);
+    const rank = (k) => (order.includes(k) ? order.indexOf(k) : order.length);
+    entries = entries.sort((a, b) => rank(a[0]) - rank(b[0]));
+  }
+  const pills = (key) =>
+    ordered
+      ? state.meta.columns
+          .filter((c) => noteKeyFor(c, state.meta) === key)
+          .map((c) => `<span class="note-pill"><span class="hint">${esc(c.name)}</span> ${pill(c, statusOf(currentItem, c.id))}</span>`)
+          .join("")
+      : "";
+  return entries
     .map(
       ([key, text], i) => `<div class="note-card">
-        <header>${esc(platformName(key))}<span class="spacer"></span>
+        <header>${esc(noteName(key))}${pills(key)}<span class="spacer"></span>
           <button class="btn btn-ghost" style="padding:0 6px;font-size:12px" data-copy="${i}">Copy</button></header>
         <pre data-note="${i}">${linkify(text)}</pre></div>`,
     )
@@ -837,25 +1003,28 @@ function editButton(key) {
     : `<button class="btn" data-action="settings">Sign in to edit</button>`;
 }
 
+let currentItem = null;
+
 function featureView({ entry, feature }) {
+  currentItem = feature;
   const groups = columnGroups();
   const statusHtml = groups
     .map(
       (g) => `<div class="status-cell ${g.columns.some((c) => c.id === state.focus) ? "focus" : ""}">
         <div class="sc-name">${esc(g.label)}</div>
         <div style="display:flex;gap:10px;flex-wrap:wrap">${g.columns
-          .map((c) => `<div style="text-align:center"><div class="hint">${esc(c.name)}</div>${pill(statusOf(feature, c.id))}</div>`)
+          .map((c) => `<div style="text-align:center"><div class="hint">${esc(c.name)}</div>${pill(c, statusOf(feature, c.id))}</div>`)
           .join("")}</div></div>`,
     )
     .join("");
-  const tags = `<span class="tag">${esc(feature.id)}</span>${feature.label ? `<span class="tag">${esc(feature.label)}</span>` : ""}`;
+  const tags = `<span class="tag">${esc(feature.id)}</span>${feature.label && !isReq() ? `<span class="tag">${esc(feature.label)}</span>` : ""}`;
   return `${drawerHead(entry, feature.name, tags)}
     <div class="drawer-body">
-      <div class="field-label">Status</div>
+      ${isReq() ? requirementBody(feature) : `<div class="field-label">Status</div>
       <div class="status-grid">${statusHtml}</div>
       ${feature.comment ? `<div class="field-label">Description / comment</div><div class="prose">${linkify(feature.comment)}</div>` : ""}
       <div class="field-label">Notes & evidence</div>
-      ${notesCards(feature.notes) || `<div class="muted">No notes yet.</div>`}
+      ${notesCards(feature.notes) || `<div class="muted">No notes yet.</div>`}`}
     </div>
     <div class="drawer-foot">
       ${editButton(feature.id)}
@@ -867,7 +1036,7 @@ function featureView({ entry, feature }) {
 
 function componentView(entry) {
   const doc = entry.doc;
-  return `${drawerHead(entry, doc.name, `<span class="tag">${esc(doc.id)}</span><span class="tag">${doc.features.length} features</span>`)}
+  return `${drawerHead(entry, doc.name, `<span class="tag">${esc(doc.id)}</span><span class="tag">${doc.features.length} ${countNoun(state.meta, doc.features.length)}</span>`)}
     <div class="drawer-body">
       <div class="field-label">Description</div>
       <div class="prose">${linkify(doc.description ?? "") || `<span class="muted">—</span>`}</div>
@@ -879,7 +1048,8 @@ function componentView(entry) {
 }
 
 function noteKeys() {
-  return [GENERAL, ...state.meta.platforms.map((p) => p.id)];
+  if (isReq()) return noteOrder(state.meta);
+  return [...state.meta.platforms.map((p) => p.id), ...(state.meta.note_keys ?? []).map((k) => k.id)];
 }
 
 function errorsHtml() {
@@ -890,10 +1060,32 @@ function errorsHtml() {
 function notesFields(notes) {
   return noteKeys()
     .map(
-      (key) => `<div class="form-row"><label>${esc(platformName(key))} notes</label>
+      (key) => `<div class="form-row"><label>${esc(noteName(key))} notes</label>
         <textarea data-field="notes.${key}" rows="${Math.min(14, Math.max(3, (notes?.[key] ?? "").split("\n").length + 1))}"
-          placeholder="${key === GENERAL ? "Applies to all platforms" : "Evidence, logs, Jira links…"}">${esc(notes?.[key] ?? "")}</textarea></div>`,
+          placeholder="Evidence, logs, Jira links…">${esc(notes?.[key] ?? "")}</textarea></div>`,
     )
+    .join("");
+}
+
+const keptWhenExcluded = (fld) => fld.id === state.meta.exclude_when?.field || (!fld.block && fld.show !== undefined);
+
+function requirementFields(data) {
+  const gone = excluded(state.meta, data);
+  return (state.meta.fields ?? [])
+    .filter((f) => !gone || keptWhenExcluded(f))
+    .map((f) => {
+      const v = data.fields?.[f.id];
+      const attrs = `data-field="${esc(f.id)}" data-req-field`;
+      let control;
+      if (f.type === "enum") {
+        control = `<select ${attrs}><option value=""></option>${(f.values ?? []).map((o) => `<option value="${esc(o.id)}" ${o.id === v ? "selected" : ""}>${esc(o.label)}</option>`).join("")}</select>`;
+      } else if (f.type === "list") {
+        control = `<input ${attrs} data-list value="${esc(Array.isArray(v) ? v.join(", ") : "")}" placeholder="Comma-separated">`;
+      } else {
+        control = `<textarea ${attrs} rows="2">${esc(v ?? "")}</textarea>`;
+      }
+      return `<div class="form-row"><label>${esc(f.name)}</label>${control}</div>`;
+    })
     .join("");
 }
 
@@ -901,30 +1093,32 @@ function featureEditor() {
   const { entry, data, isNew } = state.draft;
   const seg = (column) => {
     const current = statusOf(data, column.id);
-    return `<div class="seg" data-column="${column.id}">${[...STATUSES, { id: "unset", label: "—" }]
-      .map((s) => `<button type="button" data-set-status="${s.id}" title="${esc(s.title ?? "Not set")}" class="${s.id} ${current === s.id ? "on" : ""}">${s.label}</button>`)
+    return `<div class="seg" data-column="${column.id}">${[...setOf(column), { id: "unset", label: "—" }]
+      .map((s) => `<button type="button" data-set-status="${esc(s.id)}" title="${esc(s.title ?? "Not set")}" class="${statusInfo(state.meta, column, s.id).cls} ${current === s.id ? "on" : ""}">${esc(s.label)}</button>`)
       .join("")}</div>`;
   };
   const statusHtml = state.meta.columns
     .map((c) => `<div class="status-cell ${c.id === state.focus ? "focus" : ""}"><div class="sc-name">${esc(columnTitle(c))}</div>${seg(c)}</div>`)
     .join("");
-  return `${drawerHead(entry, isNew ? "New feature" : `Edit ${data.id}`, `<span class="tag">${esc(data.id)}</span>`)}
+  const gone = isReq() && excluded(state.meta, data);
+  const idRow = isReq() && isNew ? `<div class="form-row"><label>ID *</label><input data-field-id value="${esc(data.id)}" placeholder="e.g. 5.01"></div>` : "";
+  return `${drawerHead(entry, isNew ? `New ${word(1)}` : `Edit ${data.id}`, `<span class="tag">${esc(data.id)}</span>`)}
     <div class="drawer-body">
       ${errorsHtml()}
-      <div class="form-row"><label>Feature name *</label><input data-field="name" value="${esc(data.name)}" placeholder="e.g. HDMI hot plug"></div>
-      <div class="form-row"><label>Short label</label><input data-field="label" value="${esc(data.label ?? "")}" placeholder="Optional short name"></div>
+      ${idRow}<div class="form-row"><label>${cap(word(1))} name *</label><input data-field="name" value="${esc(data.name)}" placeholder="e.g. HDMI hot plug"></div>
+      ${isReq() ? "" : `<div class="form-row"><label>Short label</label><input data-field="label" value="${esc(data.label ?? "")}" placeholder="Optional short name"></div>`}
       <div class="form-row"><label>Description / comment</label><textarea data-field="comment" rows="2">${esc(data.comment ?? "")}</textarea></div>
-      <div class="field-label">Status</div>
+      ${isReq() ? requirementFields(data) : ""}${gone ? `<div class="hint" data-excluded-hint>Out-of-Scope: the other fields are ignored (kept, not deleted) and come back if the scope changes.</div>` : `<div class="field-label">Status</div>
       <div class="status-grid">${statusHtml}</div>
       <div class="field-label">Notes & evidence</div>
-      ${notesFields(data.notes)}
+      ${notesFields(data.notes)}`}
       <div class="hint">Saving commits directly to <code>${esc(repo().name)}@${esc(repo().branch)}</code>. ${(state.meta.jira_projects ?? []).length ? `Jira keys like ${esc(state.meta.jira_projects[0])}-123 are linked automatically.` : ""}</div>
     </div>
     <div class="drawer-foot">
       <button class="btn btn-primary" data-action="save" ${state.saving ? "disabled" : ""}>${state.saving ? "Saving…" : "Save"}</button>
       <button class="btn" data-action="cancel-edit">Cancel</button>
       <span class="spacer"></span>
-      ${isNew ? "" : `<button class="btn btn-danger" data-action="delete">Delete feature</button>`}
+      ${isNew ? "" : `<button class="btn btn-danger" data-action="delete">Delete ${word(1)}</button>`}
     </div>`;
 }
 
@@ -963,6 +1157,17 @@ function startEdit(key) {
 async function saveDraft({ remove = false } = {}) {
   const draft = state.draft;
   const { entry, data, kind, isNew } = draft;
+  if (kind === "feature" && isReq()) {
+    data.id = String(data.id ?? "").trim();
+    if (isNew) {
+      const taken = state.index.has(data.id) || state.components.some((c) => c.doc.id === data.id);
+      if (!data.id || taken) {
+        draft.errors = [!data.id ? "ID is required" : `${data.id} already exists`];
+        renderDrawer(draft.key);
+        return;
+      }
+    }
+  }
   state.saving = true;
   draft.errors = null;
   renderDrawer(draft.key);
@@ -986,7 +1191,9 @@ async function saveDraft({ remove = false } = {}) {
       commitInfo = await commit(
         entry,
         (doc) => {
-          savedId = doc.features.some((f) => f.id === data.id) ? nextFeatureId(doc) : data.id;
+          const clash = doc.features.some((f) => f.id === data.id);
+          if (clash && isReq()) throw new ConflictError(`${data.id} was added by someone else.`);
+          savedId = clash ? nextFeatureId(doc) : data.id;
           doc.features.push({ ...data, id: savedId });
           return doc;
         },
@@ -1026,7 +1233,7 @@ async function saveDraft({ remove = false } = {}) {
 
 // ---------------------------------------------------------------- batch status change
 
-const BATCH_VALUES = [...STATUSES.map((s) => s.id), "unset"];
+const batchValues = (column) => [...setOf(column).map((s) => s.id), "unset"];
 
 function localDate() {
   const d = new Date();
@@ -1050,15 +1257,16 @@ function renderBatchBar() {
   }
   const column = batchColumn();
   const value = state.batch.value;
+  const batchNoteKey = noteKeyFor(column, state.meta);
   bar.innerHTML = `
     <strong class="batch-count">${state.selection.size} selected</strong>
     <label class="batch-field">Set <select id="batch-column">${state.meta.columns
       .map((c) => `<option value="${c.id}" ${c.id === column.id ? "selected" : ""}>${esc(columnTitle(c))}</option>`)
       .join("")}</select></label>
-    <span class="seg">${BATCH_VALUES.map(
-      (v) => `<button type="button" data-batch-value="${v}" class="${v} ${v === value ? "on" : ""}" title="${esc(statusTitle(v))}">${statusLabel(v)}</button>`,
+    <span class="seg">${batchValues(column).map(
+      (v) => `<button type="button" data-batch-value="${esc(v)}" class="${statusInfo(state.meta, column, v).cls} ${v === value ? "on" : ""}" title="${esc(statusTitle(column, v))}">${esc(statusLabel(column, v))}</button>`,
     ).join("")}</span>
-    <textarea id="batch-note" rows="1" placeholder="Meeting note (optional) — added to the notes of every changed item">${esc(state.batch.note)}</textarea>
+    ${batchNoteKey ? `<textarea id="batch-note" rows="1" placeholder="Meeting note (optional) — added to the notes of every changed item">${esc(state.batch.note)}</textarea>` : ""}
     <button class="btn" data-action="batch-clear">Cancel</button>
     <button class="btn btn-primary" data-action="batch-apply" ${value ? "" : "disabled"}>Apply &amp; save</button>`;
 }
@@ -1067,28 +1275,30 @@ function renderBatchBar() {
 function batchPreview() {
   const column = batchColumn();
   const value = state.batch.value;
-  const options = { noteKey: column.platform || GENERAL, note: state.batch.note, date: localDate(), columnName: column.name };
+  const noteKey = noteKeyFor(column, state.meta);
+  const options = { noteKey, note: noteKey ? state.batch.note : "", date: localDate(), columnName: column.name, set: setOf(column), applies: (f) => !excluded(state.meta, f) };
   const ids = [...state.selection];
   const missing = ids.filter((id) => !state.index.has(id));
   const files = [];
   for (const entry of state.components) {
     const mine = ids.filter((id) => state.index.get(id)?.entry === entry);
     if (!mine.length) continue;
-    const result = applyBatch(entry.doc, mine, column.id, value, options);
+    const result = applyBatch(entry.doc, mine, column.id, value, { ...options, own: new Set(mine) });
     files.push({ entry, ids: mine, ...result });
   }
   const changed = files.flatMap((f) => f.changed);
   const skipped = files.flatMap((f) => f.skipped);
-  return { column, value, options, files, changed, skipped, missing };
+  const notApplicable = files.flatMap((f) => f.notApplicable);
+  return { column, value, options, files, changed, skipped, notApplicable, missing };
 }
 
 function batchItemList(p) {
   const rows = (ids, label) => ids.map((id) => {
     const hit = state.index.get(id);
     const old = statusOf(hit.feature, p.column.id);
-    return `<li><code>${esc(id)}</code> ${esc(hit.feature.name)}: ${label ? esc(label) : `${esc(statusLabel(old))} → ${esc(statusLabel(p.value))}`}</li>`;
+    return `<li><code>${esc(id)}</code> ${esc(hit.feature.name)}: ${label ? esc(label) : `${esc(statusLabel(p.column, old))} → ${esc(statusLabel(p.column, p.value))}`}</li>`;
   }).join("");
-  const skippedLabel = `already ${p.value === "unset" ? "not set" : statusLabel(p.value)}`;
+  const skippedLabel = `already ${p.value === "unset" ? "not set" : statusLabel(p.column, p.value)}`;
   return `<details class="batch-items"><summary>Show the ${p.changed.length + p.skipped.length} selected item(s)</summary>
     <ul>${rows(p.changed)}${rows(p.skipped, skippedLabel)}</ul></details>`;
 }
@@ -1101,21 +1311,22 @@ function openBatchConfirm() {
   }
   const p = batchPreview();
   if (!p.changed.length) {
-    const already = p.value === "unset" ? "not set" : statusLabel(p.value);
+    const already = p.value === "unset" ? "not set" : statusLabel(p.column, p.value);
     const gone = p.missing.length ? `; not found: ${esc(p.missing.join(", "))}` : "";
-    toast(`Nothing to change — ${p.skipped.length} selected item(s) already ${esc(already)}${gone}`);
+    const out = p.notApplicable.length ? `; ${p.notApplicable.length} out-of-scope` : "";
+    toast(`Nothing to change — ${p.skipped.length} selected item(s) already ${esc(already)}${out}${gone}`);
     return;
   }
   const dialog = $("#dialog");
   const touched = p.files.filter((f) => f.changed.length);
-  const sample = p.options.note.trim() ? `<div class="hint" style="margin-top:8px">Note added to each changed item:<br><code>${esc(`${p.options.date} · ${p.column.name}: … → ${statusLabel(p.value)} — ${p.options.note.trim()}`)}</code></div>` : "";
+  const sample = p.options.note.trim() ? `<div class="hint" style="margin-top:8px">Note added to each changed item:<br><code>${esc(`${p.options.date} · ${p.column.name}: … → ${statusLabel(p.column, p.value)} — ${p.options.note.trim()}`)}</code></div>` : "";
   dialog.innerHTML = `<form method="dialog" id="batch-confirm">
     <div class="dlg-head"><h2>Apply batch change</h2></div>
     <div class="dlg-body">
-      <p style="margin-top:0">Set <strong>${esc(columnTitle(p.column))}</strong> to ${pill(p.value)} on <strong>${p.changed.length}</strong> item(s).</p>
+      <p style="margin-top:0">Set <strong>${esc(columnTitle(p.column))}</strong> to ${pill(p.column, p.value)} on <strong>${p.changed.length}</strong> item(s).</p>
       <ul class="hint">
-        ${p.skipped.length ? `<li>${p.skipped.length} already ${esc(statusLabel(p.value))} — skipped</li>` : ""}
-        ${p.missing.length ? `<li>Not found (removed?): ${esc(p.missing.join(", "))}</li>` : ""}
+        ${p.skipped.length ? `<li>${p.skipped.length} already ${esc(statusLabel(p.column, p.value))} — skipped</li>` : ""}
+        ${p.notApplicable.length ? `<li>skipped ${p.notApplicable.length} out-of-scope</li>` : ""}${p.missing.length ? `<li>Not found (removed?): ${esc(p.missing.join(", "))}</li>` : ""}
         <li>One commit touching ${touched.length} file(s): ${touched.map((f) => esc(`${f.entry.doc.id} ${f.entry.doc.name}`)).join(", ")}</li>
       </ul>
       ${batchItemList(p)}
@@ -1182,10 +1393,10 @@ async function saveBatch(p) {
         return !now || !sameFeature(now, loaded, state.meta);
       });
       if (conflicts.length) throw new ConflictError(`Changed or removed by someone else meanwhile: ${conflicts.join(", ")}.`);
-      return applyBatch(latest, ids, p.column.id, p.value, p.options).doc;
+      return applyBatch(latest, ids, p.column.id, p.value, { ...p.options, own: new Set(ids) }).doc;
     },
   }));
-  const message = batchCommitMessage(columnTitle(p.column), p.value, p.changed.length);
+  const message = batchCommitMessage(columnTitle(p.column), p.value, p.changed.length, { set: p.options.set, nouns: [noun(state.meta, 1), noun(state.meta, 2)] });
   return commitFiles(changes, message);
 }
 
@@ -1332,8 +1543,8 @@ async function exportHtml() {
   const button = $('[data-action="export-html"]');
   button.disabled = true;
   try {
-    const files = ["index.html", "style.css", "app.js", "model.js", "vendor/js-yaml.mjs"];
-    const [html, css, appJs, modelJs, yamlJs] = await Promise.all(
+    const files = ["index.html", "style.css", "app.js", "model.js", "template.js", "vendor/js-yaml.mjs"];
+    const [html, css, appJs, modelJs, templateJs, yamlJs] = await Promise.all(
       files.map(async (file) => {
         const res = await fetch(file, { cache: "no-store" });
         if (!res.ok) throw new Error(`${file}: HTTP ${res.status}`);
@@ -1341,9 +1552,15 @@ async function exportHtml() {
       }),
     );
     // Inline the ES modules as data: URLs so the report works from file:// without a server.
+    // A data: module cannot resolve relative imports, so every "./x.js" must be replaced;
+    // app.js and model.js share one template.js URL so the browser loads a single instance.
     const asModule = (js) => `data:text/javascript;base64,${utf8ToBase64(js)}`;
-    const model = modelJs.replace('"./vendor/js-yaml.mjs"', () => JSON.stringify(asModule(yamlJs)));
-    const app = appJs.replace('"./model.js"', () => JSON.stringify(asModule(model)));
+    const template = JSON.stringify(asModule(templateJs));
+    const model = modelJs.replace('"./vendor/js-yaml.mjs"', () => JSON.stringify(asModule(yamlJs))).replace('"./template.js"', () => template);
+    const app = appJs.replace('"./model.js"', () => JSON.stringify(asModule(model))).replace('"./template.js"', () => template);
+    for (const [name, js] of [["template.js", templateJs], ["model.js", model], ["app.js", app]]) {
+      if (/\bfrom\s+["']\.\.?\//.test(js)) throw new Error(`${name} still has a relative import; cannot export`);
+    }
     const payload = {
       generated: new Date().toISOString(),
       version: state.version,
@@ -1382,7 +1599,8 @@ async function exportHtml() {
 function exportCsv() {
   const cell = (v) => `"${String(v ?? "").replace(/"/g, '""')}"`;
   const keys = noteKeys();
-  const header = ["ID", "Section", "Component", "Feature", "Label", "Comment", ...state.meta.columns.map(columnTitle), ...keys.map((k) => `${platformName(k)} notes`)];
+  const extra = isReq() ? (state.meta.fields ?? []) : [];
+  const header = ["ID", "Section", "Component", cap(word(1)), ...(isReq() ? [] : ["Label"]), "Comment", ...extra.map((f) => f.name), ...state.meta.columns.map(columnTitle), ...keys.map((k) => `${noteName(k)} notes`)];
   const lines = [header.map(cell).join(",")];
   for (const entry of state.components) {
     for (const f of entry.doc.features) {
@@ -1392,10 +1610,11 @@ function exportCsv() {
           sectionOf(entry.doc.id)?.name,
           entry.doc.name,
           f.name,
-          f.label,
+          ...(isReq() ? [] : [f.label]),
           f.comment,
-          ...state.meta.columns.map((c) => (f.status?.[c.id] ? statusLabel(f.status[c.id]) : "")),
-          ...keys.map((k) => f.notes?.[k]),
+          ...extra.map((fld) => (isExcluded(f) && !keptWhenExcluded(fld) ? "" : fieldValue(fld, f))),
+          ...state.meta.columns.map((c) => (!isExcluded(f) && f.status?.[c.id] ? statusLabel(c, f.status[c.id]) : "")),
+          ...keys.map((k) => (isExcluded(f) ? "" : f.notes?.[k])),
         ]
           .map(cell)
           .join(","),
@@ -1476,6 +1695,12 @@ document.addEventListener("click", (event) => {
   const focus = target.closest("[data-focus]");
   if (focus) return setFocus(focus.dataset.focus);
 
+  const fieldFilter = target.closest("[data-field-filter]");
+  if (fieldFilter) {
+    location.hash = hrefWith({ [fieldFilter.dataset.fieldFilter]: fieldFilter.dataset.value });
+    return;
+  }
+
   const statusFilter = target.closest("[data-status-filter]");
   if (statusFilter) {
     state.filter.status = statusFilter.dataset.statusFilter;
@@ -1504,12 +1729,27 @@ document.addEventListener("click", (event) => {
   if (row && !target.closest("a") && !target.closest("td.sel")) location.hash = hrefWith({ open: row.dataset.open });
 });
 
-document.addEventListener("input", (event) => {
+function onDraftInput(event) {
   const field = event.target.dataset?.field;
   if (field && state.draft) {
     const value = event.target.value;
+    if (event.target.dataset.reqField !== undefined) {
+      const fields = { ...state.draft.data.fields };
+      const parsed = event.target.dataset.list !== undefined ? value.split(",").map((x) => x.trim()).filter(Boolean) : value;
+      if (parsed === "" || (Array.isArray(parsed) && !parsed.length)) delete fields[field];
+      else fields[field] = parsed;
+      state.draft.data.fields = fields;
+      state.draft.dirty = true;
+      if (event.target.tagName === "SELECT") renderDrawer(state.draft.key);
+      return;
+    }
     if (field.startsWith("notes.")) state.draft.data.notes = { ...state.draft.data.notes, [field.slice(6)]: value };
     else state.draft.data[field] = value;
+    state.draft.dirty = true;
+    return;
+  }
+  if (event.target.dataset?.fieldId !== undefined && state.draft) {
+    state.draft.data.id = event.target.value;
     state.draft.dirty = true;
     return;
   }
@@ -1528,12 +1768,17 @@ document.addEventListener("input", (event) => {
     state.filter.status = "";
     render();
   }
-});
+}
+document.addEventListener("input", onDraftInput);
 
+document.addEventListener("change", (event) => {
+  if (event.target.tagName === "SELECT" && event.target.dataset.reqField !== undefined && state.draft) onDraftInput(event);
+});
 $("#focus-column").addEventListener("change", (event) => setFocus(event.target.value));
 document.addEventListener("change", (event) => {
   if (event.target.id === "batch-column") {
     state.batch.column = event.target.value;
+    if (!batchValues(batchColumn()).includes(state.batch.value)) state.batch.value = null;
     renderBatchBar();
   }
 });

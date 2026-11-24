@@ -1,0 +1,30 @@
+id: B.2
+name: Recovery
+description: Recovery
+features:
+  - id: B.2.1
+    name: Rescue shell
+    label: Rescue
+    status:
+      soc: supported
+      board-x-ea: supported
+      board-x-ga: supported
+      board-y-beta: supported
+    notes:
+      board-x: ok
+  - id: B.2.2
+    name: Factory reset
+    label: Rescue
+    status:
+      soc: supported
+      board-x-ea: supported
+      board-x-ga: tbd
+      board-y-beta: unsupported
+  - id: B.2.3
+    name: Rollback
+    label: Rescue
+    status:
+      soc: tbd
+      board-x-ea: unsupported
+      board-x-ga: supported
+      board-y-beta: supported

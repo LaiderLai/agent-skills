@@ -394,3 +394,71 @@ body.exported .app-only { display: none !important; }
   .topbar, .sidebar, .drawer, .scrim, .batch-bar, .matrix th.sel, .matrix td.sel { display: none !important; }
   .content { padding: 0; }
 }
+
+/* Status tones used by non-default status sets (requirement matrix). */
+:root {
+  --tone-neutral: #5f6b7a; --tone-neutral-soft: #eceff3; --tone-neutral-bar: #8a94a6;
+  --tone-info: #1d5fbf; --tone-info-soft: #e3eefc; --tone-info-bar: #5b9bea;
+  --tone-warn: #b33a00; --tone-warn-soft: #ffe9dd; --tone-warn-bar: #e8590c;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --tone-neutral: #b4bcc8; --tone-neutral-soft: #2b313a; --tone-neutral-bar: #6b7686;
+    --tone-info: #8ab8f5; --tone-info-soft: #1d2f4a; --tone-info-bar: #3f78c4;
+    --tone-warn: #ffab7a; --tone-warn-soft: #4a2412; --tone-warn-bar: #d9531e;
+  }
+}
+.pill.tone-yes, .count.tone-yes { background: var(--yes-soft); color: var(--yes); font-weight: 600; }
+.pill.tone-no, .count.tone-no { background: var(--no-soft); color: var(--no); font-weight: 600; }
+.pill.tone-open, .count.tone-open { background: var(--tbd-solid); color: var(--tbd); }
+.pill.tone-neutral, .count.tone-neutral { background: var(--tone-neutral-soft); color: var(--tone-neutral); font-weight: 600; }
+.pill.tone-info, .count.tone-info { background: var(--tone-info-soft); color: var(--tone-info); font-weight: 600; }
+.pill.tone-warn, .count.tone-warn { background: var(--tone-warn-soft); color: var(--tone-warn); font-weight: 600; }
+.seg button.on.tone-yes { background: var(--yes); color: #fff; }
+.seg button.on.tone-no { background: var(--no); color: #fff; }
+.seg button.on.tone-open { background: var(--tbd-solid); color: var(--tbd); }
+.seg button.on.tone-neutral { background: var(--tone-neutral); color: var(--surface); }
+.seg button.on.tone-info { background: var(--tone-info); color: var(--surface); }
+.seg button.on.tone-warn { background: var(--tone-warn); color: var(--surface); }
+.bar .tone-yes { background: var(--yes-bar); }
+.bar .tone-no { background: var(--no-bar); }
+.bar .tone-open { background: var(--tbd-bar); }
+.bar .tone-neutral { background: var(--tone-neutral-bar); }
+.bar .tone-info { background: var(--tone-info-bar); }
+.bar .tone-warn { background: var(--tone-warn-bar); }
+.stat.tone-yes .stat-num { color: var(--yes); }
+.stat.tone-no .stat-num { color: var(--no); }
+.stat.tone-open .stat-num { color: var(--tbd); }
+.stat.tone-neutral .stat-num { color: var(--tone-neutral); }
+.stat.tone-info .stat-num { color: var(--tone-info); }
+.stat.tone-warn .stat-num { color: var(--tone-warn); }
+
+/* ---------- requirement matrix ---------- */
+.chips-label { color: var(--muted); font-size: 12px; align-self: center; margin-left: 8px; }
+.toolbar #chips-host { display: inline-flex; flex-wrap: wrap; gap: 6px; }
+td.risk-critical { color: var(--no); font-weight: 600; }
+.test-plan { margin-bottom: 12px; }
+.test-plan .tp-row + .tp-row { margin-top: 8px; }
+.note-card header .note-pill { margin-left: 10px; font-weight: 400; }
+
+.matrix tbody tr.excluded td { opacity: 0.55; background: var(--unset-soft, transparent); }
+.matrix tbody tr.excluded .ex-note { font-style: italic; color: var(--muted); }
+.drawer-block { margin-bottom: 20px; }
+.block-title { font-size: 13px; font-weight: 600; margin: 0 0 8px; padding-bottom: 4px; border-bottom: 1px solid var(--border, currentColor); }
+.exec-phases { display: flex; gap: 14px; flex-wrap: wrap; margin-bottom: 8px; }
+.exec-phase { text-align: center; }
+
+/* Requirement overview warning levels. */
+.stat.level-red { --lv: #c7222a; --lv-soft: #fdecee; }
+.stat.level-orange { --lv: #c2570c; --lv-soft: #fff0e2; }
+.stat.level-yellow { --lv: #8a6d00; --lv-soft: #fff8d6; }
+.stat.level-green { --lv: #1d7a3e; --lv-soft: #e7f6ec; }
+.stat.level-red, .stat.level-orange, .stat.level-yellow, .stat.level-green { background: var(--lv-soft); border-color: var(--lv); box-shadow: inset 5px 0 0 var(--lv), var(--shadow); }
+.stat.level-red .stat-num, .stat.level-orange .stat-num, .stat.level-yellow .stat-num, .stat.level-green .stat-num,
+.stat.level-red .stat-label, .stat.level-orange .stat-label, .stat.level-yellow .stat-label, .stat.level-green .stat-label { color: var(--lv); }
+@media (prefers-color-scheme: dark) {
+  .stat.level-red { --lv: #ff7b82; --lv-soft: #3a1b1e; }
+  .stat.level-orange { --lv: #ffa55c; --lv-soft: #3a2615; }
+  .stat.level-yellow { --lv: #f0d24a; --lv-soft: #36300f; }
+  .stat.level-green { --lv: #5fd08a; --lv-soft: #14301f; }
+}

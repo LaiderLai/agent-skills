@@ -1,0 +1,58 @@
+message: matrix-table: set Board X · GA to YES for 2 features
+
+=== matrix-table/data/A.01-system.yaml ===
+id: A.1
+name: System
+description: CPU and memory
+notes:
+  board-x: Component note
+features:
+  - id: A.1.1
+    name: Boot to shell
+    label: Boot
+    status:
+      soc: supported
+      board-x-ea: supported
+      board-x-ga: supported
+      board-y-beta: supported
+    notes:
+      board-x: BIOS 1.0
+      board-y: BIOS 2.0
+  - id: A.1.2
+    name: Memory test
+    label: Memory
+    comment: ECC
+    status:
+      soc: supported
+      board-x-ea: supported
+      board-x-ga: supported
+      board-y-beta: unsupported
+    notes:
+      board-x: "<date> · GA: TBD → YES — agreed"
+      board-y: |-
+        PROJ-3: [BoardY] question
+        second line
+  - id: A.1.3
+    name: Suspend
+    status:
+      soc: tbd
+      board-x-ea: tbd
+      board-x-ga: supported
+    notes:
+      board-x: |-
+        Fails with
+        [build] error: cc1 failed
+        see log
+        PROJ-7 tracks this
+
+        <date> · GA: NO → YES — agreed
+  - id: A.1.4
+    name: Cache flush
+    label: Cache
+    status:
+      soc: supported
+      board-x-ea: supported
+      board-x-ga: supported
+      board-y-beta: unsupported
+    notes:
+      board-y: vendor says ok

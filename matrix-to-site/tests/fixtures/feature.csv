@@ -1,0 +1,31 @@
+Item,ID,Component,Feature,Feature,Comment,SoC,Board X EA,Board X GA,Board Y Beta,Board Y GA,Remarks
+,,,,,,Silicon,Reference board,Reference board,Partner board,Partner board,
+Kernel,,,,,Kernel features,,,,,,"Section note
+
+[BoardY] Section note for Y"
+Kernel,A.1.0,System,,,CPU and memory,,,,,,Component note
+Kernel,,System,Boot,Boot to shell,,YES,YES,YES,YES,,"BIOS 1.0
+
+[BoardY] BIOS 2.0"
+Kernel,,System,Memory,Memory test,ECC,YES,YES,TBD,NO,,"PROJ-3: [BoardY] question
+second line"
+Kernel,,System,,Suspend,,TBD,TBD,NO,,,"Fails with
+[build] error: cc1 failed
+see log
+PROJ-7 tracks this"
+,,,,,,,,,,,
+Kernel,,System,Cache,Cache flush,,YES,YES,YES,NO,,[Vendor] vendor says ok
+Kernel,A.2.0,Storage,,,Disks,,,,,,Storage note
+Kernel,,Storage,NVMe,NVMe read,,YES,YES,YES,YES,,Works
+Kernel,,Storage,NVMe,NVMe write,,YES,TBD,TBD,NO,,[BoardY] slow writes
+Kernel,,Storage,eMMC,eMMC boot,,NO,NO,NO,NO,,Not planned
+Firmware,,,,,Firmware features,,,,,,Firmware section note
+Firmware,B.1.0,Bootloader,,,Loader,,,,,,Loader note
+Firmware,,Bootloader,Secure boot,Secure boot,,YES,YES,TBD,TBD,,"[BoardY] key enrolment
+
+[BoardX] board x only"
+Firmware,,Bootloader,Update,Capsule update,,TBD,NO,NO,NO,,PROJ-7 and PROJ-8
+Firmware,B.2.0,Recovery,,,Recovery,,,,,,
+Firmware,,Recovery,Rescue,Rescue shell,,YES,YES,YES,YES,,ok
+Firmware,,Recovery,Rescue,Factory reset,,YES,YES,TBD,NO,,
+Firmware,,Recovery,Rescue,Rollback,,TBD,NO,YES,YES,,

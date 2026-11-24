@@ -86,6 +86,13 @@ def main():
         )
 
     target.mkdir(parents=True, exist_ok=True)
+    # Without --mapping, a reinstall keeps the mapping used for the last import.
+    saved_mapping = target / "tools" / "mapping.yaml"
+    kept_mapping = (
+        saved_mapping.read_bytes()
+        if not args.mapping and saved_mapping.exists()
+        else None
+    )
     for name in ("web", "tools"):
         shutil.rmtree(target / name, ignore_errors=True)
         shutil.copytree(ASSETS / name, target / name)
@@ -93,7 +100,9 @@ def main():
         SKILL / "scripts" / "convert_csv.py", target / "tools" / "convert_csv.py"
     )
     if args.mapping:
-        shutil.copy2(args.mapping, target / "tools" / "mapping.yaml")
+        shutil.copy2(args.mapping, saved_mapping)
+    elif kept_mapping is not None:
+        saved_mapping.write_bytes(kept_mapping)
     shutil.copy2(ASSETS / "package.json", target / "package.json")
     if not (target / "README.md").exists() or args.force:
         shutil.copy2(ASSETS / "README.md", target / "README.md")

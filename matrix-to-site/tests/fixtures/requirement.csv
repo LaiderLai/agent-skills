@@ -1,0 +1,35 @@
+Based on template: ,v1.2,,Last Updated:,2025-04-16,,,,,,,,,,,,,,,,,
+Requirements,,,,,,Risk assessment,,,,"Project Execution
+[Platform#1]",,,,,,Test Plan,,,,,
+Source of Req,"Req
+ID",Category,Feature (Component),Requirement Description,Project Scope (Approved),"Check items in
+Discovery phase",Risk,Notes,"Bug#
+or JIRA ID#","[Platform #1]
+x01
+<example version name>","x02
+",(TBA) future MS,"[Platform #2]
+x01
+<example version name>","x02
+",(TBA) future MS,Test ID,Test Short Name,Test Description,Test expected outcome,Checkbox test type,Checkbox test status
+Initial SoW,1.01,General,OS Version,Image reports the expected release,In Scope,Check release string,None,"[x01]
+os-release","LP#001, LP#002",Supported,Enabled,,,,,,,,,Automated,Implemented
+Initial SoW,1.02,General,Kernel,,In Scope,,None,"uname desktop
+
+[x01]
+uname image",,Supported,,,,,,,,,,Automated,Implemented
+QA,2.01,Hardware Configuration,CPU,All cores online,In Scope,,None,"lscpu
+[    0.258147] boot log
+
+[x01] the same",bug#10,Supported,,,,,,cpu-001,"- cpu/clocktest
+- cpu/maxfreq",,,Automated,Implemented
+QA,2.03,Hardware Configuration,GPU,,In Scope,,Critical,"PROJ-12: needs workaround
+
+[x01]
+works with component",PROJ-12,Enabled,,,,,,,,,,Automated,Implemented
+Initial SoW,2.08.01,Hardware Configuration,"Wi-Fi
+(2.4 GHz)",,Out-of-Scope,,Critical,PROJ-20: ignored,PROJ-20,Out-of-Scope,,,,,,,,,,Automated,Implemented
+Initial SoW,2.10,Hardware Configuration,Display,,TBD,,,,,Enabled,,,,,,,,,,Automated,Implemented
+QA,2.16,Hardware Configuration,Watchdog,,In Scope,,Critical,PROJ-15: driver missing,,Not supported,,,,,,,,,,Automated,Implemented
+QA,3.01,Security,Secure Boot,,In Scope,,None,,,,,,,,,,,,,Automated,Implemented
+Initial SoW,4.01,Process,Release Notes,,Out-of-Scope,,None,,,Out-of-Scope,,,,,,,,,,Automated,Implemented
+,,,,,,,,,,,,,,,,,,,,Automated,Implemented

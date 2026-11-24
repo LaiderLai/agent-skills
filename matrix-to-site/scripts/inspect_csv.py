@@ -145,6 +145,18 @@ def main():
     rows, encoding = read_csv(args.csv, args.encoding)
     if not any(any(c.strip() for c in r) for r in rows):
         sys.exit(f"error: {args.csv} has no data")
+    import requirement_matrix
+
+    version = requirement_matrix.detect(rows)
+    if version:
+        if version != requirement_matrix.SUPPORTED_VERSION:
+            print(
+                f"warning: template version {version} (expected {requirement_matrix.SUPPORTED_VERSION}); drafting anyway",
+                file=sys.stderr,
+            )
+        mapping = requirement_matrix.draft_mapping(rows)
+        print(requirement_matrix.render_draft(mapping), end="")
+        return
     header_rows = guess_header_rows(rows)
     cols = profile(rows, header_rows)
     err = sys.stderr
@@ -271,11 +283,12 @@ def main():
                 else ""
             )
             print(f'  "{m}": "TODO"{hint}   # x{n}')
+    if markers or len(status_cols) >= 2:
         print(
-            'notes_head_platform: "TODO"   # platform for text before the first marker, or delete -> general'
+            'notes_head_platform: "platform-a"   # CONFIRM platform for text before the first marker'
         )
         print(
-            '# notes_default_platform: "TODO"   # platform for cells with no marker (default: general)'
+            'notes_default_platform: "platform-a"   # CONFIRM platform for cells with no marker'
         )
 
 

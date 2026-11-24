@@ -1,0 +1,69 @@
+template: "requirement-matrix"
+title: "Example Matrix table"
+noun: ["requirement", "requirements"]
+header_rows: 3
+jira_url: "https://example.atlassian.net/browse/"
+jira_projects: ["PROJ"]
+repository:
+  name: "example-org/example-repo"
+  branch: "matrix-table-demo"
+id_column: 1
+columns: {category: 2, name: 3, comment: 4, notes: 8, jira: 9}
+platforms:
+  - {id: "platform-1", name: "Board X"}
+exclude_when: {field: scope, equals: out-of-scope}
+status_sets:
+  execution:
+    - {id: supported, label: Supported, resolved: true, tone: "yes", title: "Works with the standard image"}
+    - {id: enabled, label: Enabled, resolved: true, tone: info, title: "Works after project enablement (custom driver, kernel component or workaround)"}
+    - {id: not-supported, label: Not supported, resolved: false, tone: "no", title: "In scope but cannot be supported"}
+status_values:
+  execution: {"Supported": supported, "Enabled": enabled, "Not supported": not-supported}
+fields:
+  - id: scope
+    name: Scope
+    type: enum
+    show: table
+    filter: true
+    column: 5
+    values:
+      - {id: in-scope, label: In Scope}
+      - {id: out-of-scope, label: Out-of-Scope, tone: neutral}
+      - {id: tbd, label: TBD, tone: open}
+    raw_values: {"In Scope": in-scope, "Out-of-Scope": out-of-scope, "TBD": tbd}
+  - id: risk
+    name: Risk
+    type: enum
+    show: table
+    filter: true
+    block: discovery
+    column: 7
+    values:
+      - {id: none, label: None}
+      - {id: critical, label: Critical, tone: "no"}
+    raw_values: {"None": none, "Critical": critical}
+  - {id: source, name: Source, type: text, show: detail, column: 0}
+  - {id: discovery_check, name: Discovery check, type: text, show: detail, block: discovery, column: 6}
+  - {id: test_ids, name: Test IDs, type: list, show: detail, block: test-plan, column: 16}
+  - {id: test_name, name: Test name, type: text, show: detail, block: test-plan, column: 17}
+  - {id: test_description, name: Test description, type: text, show: detail, block: test-plan, column: 18}
+  - {id: test_expected, name: Expected outcome, type: text, show: detail, block: test-plan, column: 19}
+  - {id: test_type, name: Checkbox test type, type: text, show: detail, block: test-plan, column: 20}
+  - {id: test_status, name: Checkbox test status, type: text, show: detail, block: test-plan, column: 21}
+note_keys:
+  - {id: discovery, name: Discovery}
+  - {id: ea, name: EA}
+  - {id: fc, name: FC}
+  - {id: ga, name: GA}
+  - {id: qa, name: QA}
+status_columns:
+  - {column: 10, id: ea, name: EA, platform: platform-1, status_set: execution, note_key: ea}
+  - {column: 11, id: fc, name: FC, platform: platform-1, status_set: execution, note_key: fc}
+  - {column: 12, id: ga, name: GA, platform: platform-1, status_set: execution, note_key: ga}
+  - id: test
+    name: Test
+    group: Test plan
+    role: test
+    note_key: qa
+    default: {value: tbd}
+notes_default_key: discovery

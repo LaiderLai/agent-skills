@@ -1,0 +1,286 @@
+{
+ "meta": {
+  "title": "DEMO Matrix table",
+  "jira_url": "https://example.atlassian.net/browse/",
+  "jira_projects": [
+   "PROJ"
+  ],
+  "repository": {
+   "name": "example-org/example-repo",
+   "branch": "matrix-table-demo",
+   "path": "matrix-table/data",
+   "tag_prefix": "matrix-table/"
+  },
+  "platforms": [
+   {
+    "id": "board-x",
+    "name": "Board X",
+    "hardware": "Reference board"
+   },
+   {
+    "id": "board-y",
+    "name": "Board Y",
+    "hardware": "Partner board"
+   }
+  ],
+  "columns": [
+   {
+    "id": "soc",
+    "name": "SoC",
+    "group": "Supported by HW/FW"
+   },
+   {
+    "id": "board-x-ea",
+    "platform": "board-x",
+    "name": "EA"
+   },
+   {
+    "id": "board-x-ga",
+    "platform": "board-x",
+    "name": "GA"
+   },
+   {
+    "id": "board-y-beta",
+    "platform": "board-y",
+    "name": "Beta"
+   },
+   {
+    "id": "board-y-ga",
+    "platform": "board-y",
+    "name": "GA"
+   }
+  ],
+  "sections": [
+   {
+    "id": "A",
+    "name": "Kernel",
+    "description": "Kernel features",
+    "notes": {
+     "board-x": "Section note",
+     "board-y": "Section note for Y"
+    }
+   },
+   {
+    "id": "B",
+    "name": "Firmware",
+    "description": "Firmware features",
+    "notes": {
+     "board-x": "Firmware section note"
+    }
+   }
+  ]
+ },
+ "components": [
+  {
+   "path": "matrix-table/data/A.01-system.yaml",
+   "doc": {
+    "id": "A.1",
+    "name": "System",
+    "description": "CPU and memory",
+    "notes": {
+     "board-x": "Component note"
+    },
+    "features": [
+     {
+      "id": "A.1.1",
+      "name": "Boot to shell",
+      "label": "Boot",
+      "status": {
+       "soc": "supported",
+       "board-x-ea": "supported",
+       "board-x-ga": "supported",
+       "board-y-beta": "supported"
+      },
+      "notes": {
+       "board-x": "BIOS 1.0",
+       "board-y": "BIOS 2.0"
+      }
+     },
+     {
+      "id": "A.1.2",
+      "name": "Memory test",
+      "label": "Memory",
+      "comment": "ECC",
+      "status": {
+       "soc": "supported",
+       "board-x-ea": "supported",
+       "board-x-ga": "tbd",
+       "board-y-beta": "unsupported"
+      },
+      "notes": {
+       "board-y": "PROJ-3: [BoardY] question\nsecond line"
+      }
+     },
+     {
+      "id": "A.1.3",
+      "name": "Suspend",
+      "status": {
+       "soc": "tbd",
+       "board-x-ea": "tbd",
+       "board-x-ga": "unsupported"
+      },
+      "notes": {
+       "board-x": "Fails with\n[build] error: cc1 failed\nsee log\nPROJ-7 tracks this"
+      }
+     },
+     {
+      "id": "A.1.4",
+      "name": "Cache flush",
+      "label": "Cache",
+      "status": {
+       "soc": "supported",
+       "board-x-ea": "supported",
+       "board-x-ga": "supported",
+       "board-y-beta": "unsupported"
+      },
+      "notes": {
+       "board-y": "vendor says ok"
+      }
+     }
+    ]
+   }
+  },
+  {
+   "path": "matrix-table/data/A.02-storage.yaml",
+   "doc": {
+    "id": "A.2",
+    "name": "Storage",
+    "description": "Disks",
+    "notes": {
+     "board-x": "Storage note"
+    },
+    "features": [
+     {
+      "id": "A.2.1",
+      "name": "NVMe read",
+      "label": "NVMe",
+      "status": {
+       "soc": "supported",
+       "board-x-ea": "supported",
+       "board-x-ga": "supported",
+       "board-y-beta": "supported"
+      },
+      "notes": {
+       "board-x": "Works"
+      }
+     },
+     {
+      "id": "A.2.2",
+      "name": "NVMe write",
+      "label": "NVMe",
+      "status": {
+       "soc": "supported",
+       "board-x-ea": "tbd",
+       "board-x-ga": "tbd",
+       "board-y-beta": "unsupported"
+      },
+      "notes": {
+       "board-y": "slow writes"
+      }
+     },
+     {
+      "id": "A.2.3",
+      "name": "eMMC boot",
+      "label": "eMMC",
+      "status": {
+       "soc": "unsupported",
+       "board-x-ea": "unsupported",
+       "board-x-ga": "unsupported",
+       "board-y-beta": "unsupported"
+      },
+      "notes": {
+       "board-x": "Not planned"
+      }
+     }
+    ]
+   }
+  },
+  {
+   "path": "matrix-table/data/B.01-bootloader.yaml",
+   "doc": {
+    "id": "B.1",
+    "name": "Bootloader",
+    "description": "Loader",
+    "notes": {
+     "board-x": "Loader note"
+    },
+    "features": [
+     {
+      "id": "B.1.1",
+      "name": "Secure boot",
+      "status": {
+       "soc": "supported",
+       "board-x-ea": "supported",
+       "board-x-ga": "tbd",
+       "board-y-beta": "tbd"
+      },
+      "notes": {
+       "board-y": "key enrolment\n\n[BoardX] board x only"
+      }
+     },
+     {
+      "id": "B.1.2",
+      "name": "Capsule update",
+      "label": "Update",
+      "status": {
+       "soc": "tbd",
+       "board-x-ea": "unsupported",
+       "board-x-ga": "unsupported",
+       "board-y-beta": "unsupported"
+      },
+      "notes": {
+       "board-x": "PROJ-7 and PROJ-8"
+      }
+     }
+    ]
+   }
+  },
+  {
+   "path": "matrix-table/data/B.02-recovery.yaml",
+   "doc": {
+    "id": "B.2",
+    "name": "Recovery",
+    "description": "Recovery",
+    "features": [
+     {
+      "id": "B.2.1",
+      "name": "Rescue shell",
+      "label": "Rescue",
+      "status": {
+       "soc": "supported",
+       "board-x-ea": "supported",
+       "board-x-ga": "supported",
+       "board-y-beta": "supported"
+      },
+      "notes": {
+       "board-x": "ok"
+      }
+     },
+     {
+      "id": "B.2.2",
+      "name": "Factory reset",
+      "label": "Rescue",
+      "status": {
+       "soc": "supported",
+       "board-x-ea": "supported",
+       "board-x-ga": "tbd",
+       "board-y-beta": "unsupported"
+      }
+     },
+     {
+      "id": "B.2.3",
+      "name": "Rollback",
+      "label": "Rescue",
+      "status": {
+       "soc": "tbd",
+       "board-x-ea": "unsupported",
+       "board-x-ga": "supported",
+       "board-y-beta": "supported"
+      }
+     }
+    ]
+   }
+  }
+ ],
+ "versions": []
+}

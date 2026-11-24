@@ -1,11 +1,16 @@
 ---
 name: matrix-to-site
-description: Use when someone has a feature list, support matrix or scope tracking spreadsheet (CSV export with platform/milestone YES/NO/TBD style columns, remarks or pasted logs) that is hard to maintain and wants it turned into YAML in git with a browsable, editable web page on GitHub Pages, version snapshots, or a standalone HTML report for customers — or asks to deploy such a matrix table site to a repo or branch, even if they only say "make this CSV a page like our other project's matrix table" or "turn our feature list CSV into a web page and deploy it".
+description: Use when someone has a feature list, support matrix, or requirement / scope tracking spreadsheet (CSV export with platform/milestone YES/NO/TBD or Supported/Out-of-Scope style columns, remarks or pasted logs) that is hard to maintain and wants it turned into YAML in git with a browsable, editable web page on GitHub Pages, version snapshots, or a standalone HTML report for customers — or asks to deploy such a matrix table site to a repo or branch, even if they only say "make this CSV a page like our other project's matrix table" or "turn our feature list CSV into a web page and deploy it".
 ---
 
 # Matrix to Site
 
 ## Overview
+
+Two templates are supported: the **feature matrix** (default) and the **requirement
+matrix** (a requirement / scope tracking sheet: Req ID, Category, Scope, per-platform
+phase status, Jira ID). `inspect_csv.py` detects which one the CSV is and drafts the
+mapping; the requirement one is marked `template: requirement-matrix`.
 
 `assets/` holds a finished, tested site: static web UI (overview, matrix, search,
 detail drawer, in-browser editing and batch status changes that commit through the
@@ -57,9 +62,25 @@ relative to this skill's directory; `$REPO` is the target repo, `$B` the deploy 
 3. **Confirm the mapping with the user** before converting — show it as a short
    table: platforms, each status column (CSV header → platform · milestone), status
    value meanings, note markers → platform, where text before the first marker goes,
-   where notes with **no marker** go (`general` or one platform — this differs per
-   project, so always ask), columns dropped. Skip only if the user
+   where notes with **no marker** go (always one platform — there is no `general`
+   note; with 2+ platforms the drafted `notes_head_platform` / `notes_default_platform`
+   is only a guess — the first platform, marked `# CONFIRM` — which the user must
+   confirm or change here), columns dropped. Skip only if the user
    said not to ask; then list these as decisions in the report.
+   **Requirement matrix variant**: ask only for the real name of Platform #1 (the
+   drafted name is a placeholder; Platform #2 is dropped). The phases EA / FC / GA are
+   drafted automatically from Platform #1's x01 / x02 / future MS columns — show them,
+   don't ask. Confirm the Jira project key and show the scope values (In Scope /
+   Out-of-Scope / TBD) and execution statuses (Supported / Enabled / Not supported)
+   with their meanings: Supported and Enabled count as done; TBD and empty scope are
+   handled normally; Out-of-Scope rows are listed but keep only ID, name, description,
+   Source and Scope, everything else is ignored. The whole Notes cell goes to the
+   Discovery note. The Test column starts as TBD for every item that is not
+   Out-of-Scope. Requirements have no Short label and no Jira field: Jira keys from
+   the Jira column are appended to the Discovery note as a last line `Jira: PROJ-12, PROJ-13`; other tokens
+   (`LP#001`, `bug#10`) are template placeholders, dropped by default — state how
+   many, even if that leaves the column empty. Note sections are Discovery /
+   EA / FC / GA / QA (no General, no per-platform notes).
 4. **Branch**: `$REPO` must be clean. Create `$B` from the up-to-date default branch
    (or check it out if it exists).
 5. **Install**: `python3 scripts/scaffold.py $REPO --deploy-branch $B --mapping $WORK/mapping.yaml`
@@ -67,14 +88,21 @@ relative to this skill's directory; `$REPO` is the target repo, `$B` the deploy 
    branch could not be determined, confirm with the user that `$B` is not it.
    If it reports **already installed**, stop and ask the user which they want — never
    pick for them:
-   - **Update the site code only**: re-run with `--force` (keeps `data/`) and skip step 6.
+   - **Update the site code only**: re-run with `--force` (keeps `data/` and the saved `tools/mapping.yaml`) and skip step 6.
    - **Re-import the CSV**: replaces all of `data/`, losing edits made on the web since
      the last import. Suggest creating a version first so the old data stays viewable,
-     then re-run with `--force` and continue with step 6.
+     then re-run with `--force` and continue with step 6. This also converts data from
+     earlier versions that still has `general` notes (both templates): the converters no
+     longer write them and validation rejects them, so the old data must be re-imported.
+   Data converted with an earlier requirement template must use this option, not only `--force`.
 6. **Convert**: `python3 scripts/convert_csv.py --mapping $WORK/mapping.yaml --csv <csv> --out $REPO/matrix-table/data`
    It must exit 0. A `MISMATCH`, "status values not in mapping" or "no features found"
    means the mapping is wrong — fix it and re-run; never edit the generated YAML to
-   make numbers fit.
+   make numbers fit. For a requirement matrix also read the verification output —
+   requirement and component counts, per-column values, `out-of-scope: N items, their
+   other columns ignored`, `test: N set by default (not from CSV)`, `dropped N bug
+   tokens` (non-Jira tokens), skipped rows (no Req ID) and any version warning — and
+   report them; `check` must print no warnings.
 7. **Validate**: in `$REPO`, `node matrix-table/tools/build.mjs format`, then
    `node matrix-table/tools/build.mjs check` and
    `node matrix-table/tools/build.mjs build $WORK/preview`.
@@ -101,9 +129,11 @@ relative to this skill's directory; `$REPO` is the target repo, `$B` the deploy 
 |------|-----------|
 | Empty column whose header names a milestone (e.g. "GA2 Scope") | Keep it as a status column; it shows as "not set" |
 | Rare `[build]`-style markers from pasted logs | Leave them out of `notes_markers` |
-| Text before the first `[Platform]` marker | Set `notes_head_platform` to the platform it describes, else it goes to `general` |
-| Notes with no marker at all | Ask the user in step 3: keep them `general`, or set `notes_default_platform` to the platform they belong to |
+| Text before the first `[Platform]` marker | Set `notes_head_platform` to the platform it describes, else it goes to the default platform (never `general`) |
+| Notes with no marker at all | Ask the user in step 3 which platform they belong to and set `notes_default_platform`; with 2+ platforms the drafted value is a guess to confirm |
 | Status words like `Pending`, `N/A`, `Partial` | Map every one explicitly; YES/NO = resolved, anything still open = `tbd` |
+| Numeric-looking ids such as `2.10` (requirement matrix) | Keep them quoted strings (`"2.10"`); the converter does — never hand-edit them to numbers |
+| Platform names left as `Platform N` placeholders | Replace with real names in the mapping before converting |
 | Two header rows (group + device) | `header_rows: 2`; use the device row for `platforms[].hardware` |
 
 ## Report template
@@ -115,6 +145,13 @@ relative to this skill's directory; `$REPO` is the target repo, `$B` the deploy 
 
 | Status column | YES | NO | TBD | CSV matches |
 ...
+
+(Requirement matrix: <R> requirements in <C> components, <O> Out-of-Scope; per phase
+(EA / FC / GA) Supported / Enabled / Not supported counts and done % (Supported +
+Enabled); Risk: <done>/<risky> on <phase> (risky = not Out-of-Scope and Risk not None; empty Risk counts); test coverage
+(YES of non-Out-of-Scope items) and how many Test values are defaults; dropped bug
+tokens; skipped rows.)
+The overview flags Not supported > 0, risk < 100 % and coverage < 100 % in colour.
 
 ### Decisions to confirm
 - <mapping choices you made: markers, dropped columns, notes defaults ...>

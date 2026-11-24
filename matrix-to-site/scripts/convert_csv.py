@@ -83,8 +83,10 @@ class Converter:
             str(k).strip().upper(): v for k, v in mapping["status_values"].items()
         }
         self.markers = mapping.get("notes_markers") or {}
-        self.head_platform = mapping.get("notes_head_platform")
-        self.default_platform = mapping.get("notes_default_platform") or "general"
+        platforms = [p["id"] for p in mapping.get("platforms") or []]
+        only = platforms[0] if len(platforms) == 1 else None
+        self.default_platform = mapping.get("notes_default_platform") or only
+        self.head_platform = mapping.get("notes_head_platform") or self.default_platform
         if self.markers:
             names = "|".join(re.escape(k) for k in self.markers)
             self.marker_re = re.compile(rf"^[ \t]*\[({names})\][ \t]*", re.MULTILINE)
@@ -100,24 +102,31 @@ class Converter:
             return ""
         return row[index]
 
+    def need_platform(self, platform):
+        if not platform:
+            sys.exit(
+                "error: notes need a platform: set notes_default_platform (or notes_head_platform) in the mapping"
+            )
+        return platform
+
     def split_notes(self, text):
-        """Split a notes cell into {platform|general: text} using line-leading [Marker]s."""
+        """Split a notes cell into {platform: text} using line-leading [Marker]s."""
         text = clean(text)
         if not text:
             return {}
         if not self.markers:
-            return {self.default_platform: text}
+            return {self.need_platform(self.default_platform): text}
         found = list(self.marker_re.finditer(text))
         if not found:
             first_line = text.splitlines()[0]
             inline = self.inline_marker_re.search(first_line)
             if inline:
                 return {self.markers[inline.group(1)]: text}
-            return {self.default_platform: text}
+            return {self.need_platform(self.default_platform): text}
         notes = {}
         head = clean(text[: found[0].start()])
         if head:
-            notes[self.head_platform or "general"] = head
+            notes[self.need_platform(self.head_platform)] = head
         for i, match in enumerate(found):
             end = found[i + 1].start() if i + 1 < len(found) else len(text)
             body = clean(text[match.end() : end])
@@ -351,7 +360,12 @@ def main():
     )
     args = parser.parse_args()
     mapping = yaml.safe_load(args.mapping.read_text(encoding="utf-8"))
-    converter = Converter(mapping)
+    if mapping.get("template") == "requirement-matrix":
+        from requirement_matrix import RequirementConverter
+
+        converter = RequirementConverter(mapping)
+    else:
+        converter = Converter(mapping)
     converter.run(args.csv)
     if not args.dry_run:
         converter.write(args.out)

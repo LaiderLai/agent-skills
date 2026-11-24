@@ -1,0 +1,28 @@
+id: B.1
+name: Bootloader
+description: Loader
+notes:
+  board-x: Loader note
+features:
+  - id: B.1.1
+    name: Secure boot
+    status:
+      soc: supported
+      board-x-ea: supported
+      board-x-ga: tbd
+      board-y-beta: tbd
+    notes:
+      board-y: 'key enrolment
+
+
+        [BoardX] board x only'
+  - id: B.1.2
+    name: Capsule update
+    label: Update
+    status:
+      soc: tbd
+      board-x-ea: unsupported
+      board-x-ga: unsupported
+      board-y-beta: unsupported
+    notes:
+      board-x: PROJ-7 and PROJ-8

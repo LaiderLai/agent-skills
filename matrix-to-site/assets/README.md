@@ -32,7 +32,7 @@ features:
     status:                      # column ids come from _meta.yaml
       silicon: supported         # supported | unsupported | tbd   (omit = not set)
       board-beta: tbd
-    notes:                       # general | <platform id>
+    notes:                       # <platform id>
       board: |-
         $ sudo dmesg | grep -i watchdog
         ...
@@ -47,6 +47,43 @@ features:
 
 - Adding a milestone = add a column to `_meta.yaml`; adding a platform = add it to `platforms`.
 - Jira keys listed in `jira_projects` and URLs in notes are linked automatically.
+
+## Requirement matrix
+
+With `template: requirement-matrix` in `_meta.yaml`, items are requirements (Req ID as
+`id`) grouped by Category. Besides `name` / `comment`, the extra attributes defined in
+`_meta.yaml` (`scope`, `risk`, ...) live under `fields:`, and each item has a
+status per platform phase:
+
+```yaml
+  - id: "2.03"                   # numeric-looking ids must be quoted strings
+    name: GPU
+    status: {ea: enabled, test: tbd}
+    fields: {scope: in-scope, risk: critical}
+    notes: {discovery: "...\nJira: PROJ-12", qa: ...}
+```
+
+| Status | Meaning |
+|--------|---------|
+| Supported | **Done** – works with the standard image |
+| Enabled | **Done** – works after project enablement |
+| Not supported | **Not done** – in scope but cannot be supported |
+
+- Scope is In Scope / Out-of-Scope / TBD. Out-of-Scope items are listed but keep only
+  ID, name, description, Source and Scope; their other columns are ignored everywhere
+  (counts, cards, filters), and the editor hides those fields but keeps their data.
+- Phases EA / FC / GA come from the first platform's x01 / x02 / future MS columns.
+- The **Test** column (YES / NO / TBD only) starts as TBD for every item that is not
+  Out-of-Scope. Jira keys from the Jira column are appended to the Discovery note
+  as its last line (`Jira: PROJ-12`); other tokens are dropped.
+- Requirements have no Short label and no per-platform notes; note sections are
+  Discovery / EA / FC / GA / QA (no General).
+- All CSV notes go to the Discovery note.
+- The overview shows a done % donut per phase, a Risk card (done / risky on the focused
+  phase; risky = not Out-of-Scope and risk not None, empty counts), a Test coverage
+  card (YES ÷ non-excluded items) and a "Not done" sidebar; filters cover scope and risk.
+  Warning colours: Not supported > 0 is red; risk below 100 % is orange (red at 0 %);
+  coverage is red < 50 %, orange < 80 %, yellow < 100 %, green at 100 %.
 
 ## Editing
 

@@ -8,6 +8,7 @@ import { join, dirname } from "node:path";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { parseYaml, dumpComponent, validateComponent } from "../web/model.js";
+import { validateMeta, countNoun } from "../web/template.js";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const dataDir = join(root, "data");
@@ -19,7 +20,11 @@ const files = readdirSync(dataDir)
   .filter((name) => name.endsWith(".yaml") && !name.startsWith("_"))
   .sort();
 
-const errors = [];
+const errors = validateMeta(meta);
+if (errors.length) {
+  console.error(errors.map((e) => `error: ${e}`).join("\n"));
+  process.exit(1);
+}
 const unformatted = [];
 const components = [];
 const featureIds = new Map();
@@ -47,6 +52,11 @@ for (const name of files) {
   components.push({ path: `matrix-table/data/${name}`, doc });
 }
 
+const componentIds = new Set(components.map((c) => c.doc?.id));
+for (const [id, name] of featureIds) {
+  if (componentIds.has(id)) errors.push(`${name}: item id ${id} is also a component id`);
+}
+
 if (errors.length) {
   console.error(errors.map((e) => `error: ${e}`).join("\n"));
   process.exit(1);
@@ -58,7 +68,7 @@ if (command === "check") {
     console.error("Run: node matrix-table/tools/build.mjs format");
     process.exit(1);
   }
-  console.log(`OK: ${files.length} components, ${featureIds.size} features`);
+  console.log(`OK: ${files.length} components, ${featureIds.size} ${countNoun(meta, featureIds.size)}`);
 } else if (command === "format") {
   console.log(`Formatted ${files.length} files`);
 } else if (command === "build" && outDir) {
@@ -72,7 +82,7 @@ if (command === "check") {
   }
   const data = { generated: new Date().toISOString(), meta, components, versions };
   writeFileSync(join(outDir, "data.json"), JSON.stringify(data));
-  console.log(`Built site into ${outDir} (${components.length} components, ${featureIds.size} features, ${versions.length} versions)`);
+  console.log(`Built site into ${outDir} (${components.length} components, ${featureIds.size} ${countNoun(meta, featureIds.size)}, ${versions.length} versions)`);
 } else {
   console.error("usage: build.mjs check | format | build <dir>");
   process.exit(2);

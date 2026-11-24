@@ -1,0 +1,36 @@
+id: A.2
+name: Storage
+description: Disks
+notes:
+  board-x: Storage note
+features:
+  - id: A.2.1
+    name: NVMe read
+    label: NVMe
+    status:
+      soc: supported
+      board-x-ea: supported
+      board-x-ga: supported
+      board-y-beta: supported
+    notes:
+      board-x: Works
+  - id: A.2.2
+    name: NVMe write
+    label: NVMe
+    status:
+      soc: supported
+      board-x-ea: tbd
+      board-x-ga: tbd
+      board-y-beta: unsupported
+    notes:
+      board-y: slow writes
+  - id: A.2.3
+    name: eMMC boot
+    label: eMMC
+    status:
+      soc: unsupported
+      board-x-ea: unsupported
+      board-x-ga: unsupported
+      board-y-beta: unsupported
+    notes:
+      board-x: Not planned

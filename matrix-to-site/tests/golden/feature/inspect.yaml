@@ -1,0 +1,48 @@
+title: "TODO <PROJECT NAME> Matrix table"   # project name in upper case
+header_rows: 2   # guess
+# jira_url: "https://<site>.atlassian.net/browse/"   # TODO $MATRIX_TO_SITE_JIRA_URL unset: ask
+jira_projects: ["TODO"]   # the project's Jira key; keys seen in the CSV: PROJ x4
+repository:
+  name: "TODO owner/name"   # from `git remote get-url origin`
+  branch: "TODO"   # deploy branch; never main/master/default, e.g. matrix-table-<project>
+columns:
+  section: 0   # guess: 'Item'
+  component_id: 1   # guess: 'ID'
+  component: 2   # guess: 'Component'
+  label: 4   # guess short name: 'Feature'
+  feature: 5   # guess feature name: 'Comment'
+  # comment: <column index>   # not found - set it or leave out
+  notes: 11   # guess: 'Remarks'
+status_values:   # every non-empty value in a status column must be listed
+  "YES": supported   # x24
+  "NO": unsupported   # x13
+  "TBD": tbd   # x10
+platforms:   # TODO confirm names with the user
+  - id: "platform-a"
+    name: "Platform A"
+    hardware: ""
+status_columns:   # TODO set platform / name / group for each
+  - column: 6
+    id: "col-6"   # header 'SoC / Silicon'
+    name: "SoC / Silicon"
+    platform: "platform-a"
+  - column: 7
+    id: "col-7"   # header 'Board X EA / Reference board'
+    name: "Board X EA / Referen"
+    platform: "platform-a"
+  - column: 8
+    id: "col-8"   # header 'Board X GA / Reference board'
+    name: "Board X GA / Referen"
+    platform: "platform-a"
+  - column: 9
+    id: "col-9"   # header 'Board Y Beta / Partner board'
+    name: "Board Y Beta / Partn"
+    platform: "platform-a"
+  # empty column 10 'Board Y GA / Partner board': a milestone with no data yet? add it if so
+notes_markers:   # line-leading [Marker] -> platform id
+  "BoardY": "TODO"   # x4
+  "build": "TODO"   # rare: probably pasted log text, drop unless it is a platform   # x1
+  "Vendor": "TODO"   # rare: probably pasted log text, drop unless it is a platform   # x1
+  "BoardX": "TODO"   # rare: probably pasted log text, drop unless it is a platform   # x1
+notes_head_platform: "platform-a"   # CONFIRM platform for text before the first marker
+notes_default_platform: "platform-a"   # CONFIRM platform for cells with no marker

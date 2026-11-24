@@ -2,6 +2,7 @@ import csv
 import io
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -168,6 +169,7 @@ MAPPING = {
     ],
     "notes_markers": {"BoardB": "board-b"},
     "notes_head_platform": "board-a",
+    "notes_default_platform": "board-a",
 }
 
 
@@ -215,6 +217,32 @@ class ConvertTest(unittest.TestCase):
     def features(self, conv):
         return {f["id"]: f for c in conv.components for f in c["features"]}
 
+    def test_two_platforms_need_default_platform(self):
+        mapping = {k: v for k, v in MAPPING.items() if not k.startswith("notes_head")}
+        mapping.pop("notes_default_platform", None)
+        with self.assertRaises(SystemExit) as cm:
+            self.convert(mapping)
+        self.assertIn("notes_default_platform", str(cm.exception))
+
+    def test_one_platform_is_the_notes_default(self):
+        mapping = {
+            k: v
+            for k, v in MAPPING.items()
+            if k not in ("notes_head_platform", "notes_default_platform")
+        }
+        mapping["platforms"] = MAPPING["platforms"][:1]
+        mapping["status_columns"] = [
+            c
+            for c in MAPPING["status_columns"]
+            if c.get("platform", MAPPING["platforms"][0]["id"])
+            == MAPPING["platforms"][0]["id"]
+        ]
+        mapping["notes_markers"] = {}
+        conv = self.convert(mapping)
+        only = MAPPING["platforms"][0]["id"]
+        for f in self.features(conv).values():
+            self.assertLessEqual(set(f.get("notes", {})), {only})
+
     def test_structure_and_ids(self):
         conv = self.convert()
         self.assertEqual([c["id"] for c in conv.components], ["A.1", "A.2", "B.1"])
@@ -244,9 +272,9 @@ class ConvertTest(unittest.TestCase):
         self.assertEqual(
             f["A.1.2"]["notes"], {"board-b": "PROJ-7: [BoardB] still open?"}
         )  # inline marker
-        self.assertEqual(f["A.1.3"]["notes"], {"general": "untagged note"})
+        self.assertEqual(f["A.1.3"]["notes"], {"board-a": "untagged note"})
         self.assertEqual(
-            f["A.2.1"]["notes"], {"general": "[build] log line"}
+            f["A.2.1"]["notes"], {"board-a": "[build] log line"}
         )  # not a mapped marker
 
     def test_notes_default_platform(self):
@@ -305,6 +333,32 @@ class InspectTest(unittest.TestCase):
             self.assertIn(
                 "empty column 10", out.stdout
             )  # empty milestone is pointed out
+
+    def test_draft_notes_platform_keys(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "features.csv")
+            write_csv(path)
+            out = run(os.path.join(SCRIPTS, "inspect_csv.py"), path).stdout
+        draft = yaml.safe_load(out)
+        first = draft["platforms"][0]["id"]
+        self.assertEqual(draft["notes_default_platform"], first)
+        self.assertEqual(draft["notes_head_platform"], first)
+        for key in ("notes_default_platform", "notes_head_platform"):
+            line = next(ln for ln in out.splitlines() if ln.startswith(key))
+            self.assertIn("# CONFIRM", line)
+
+    def test_draft_notes_platform_keys_without_markers(self):
+        rows = [[re.sub(r"\[\w+\]", "", c) for c in r] for r in ROWS]
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "features.csv")
+            write_csv(path, rows)
+            out = run(os.path.join(SCRIPTS, "inspect_csv.py"), path).stdout
+        draft = yaml.safe_load(out)
+        self.assertNotIn("notes_markers", draft)
+        for key in ("notes_default_platform", "notes_head_platform"):
+            self.assertEqual(draft[key], draft["platforms"][0]["id"])
+            line = next(ln for ln in out.splitlines() if ln.startswith(key))
+            self.assertIn("# CONFIRM", line)
 
     def draft(self, jira_env):
         env = {k: v for k, v in os.environ.items() if k != "MATRIX_TO_SITE_JIRA_URL"}
@@ -400,6 +454,23 @@ class ScaffoldTest(unittest.TestCase):
             self.scaffold("--deploy-branch", "matrix-table-demo").returncode, 1
         )  # already installed
 
+    def test_force_without_mapping_keeps_the_mapping(self):
+        mapping = os.path.join(self.tmp, "mapping.yaml")
+        with open(mapping, "w") as f:
+            f.write("title: Demo Matrix table\n")
+        self.assertEqual(
+            self.scaffold(
+                "--deploy-branch", "matrix-table-demo", "--mapping", mapping
+            ).returncode,
+            0,
+        )
+        saved = os.path.join(self.repo, "matrix-table", "tools", "mapping.yaml")
+        # "Update the site code only": --force without --mapping
+        out = self.scaffold("--deploy-branch", "matrix-table-demo", "--force")
+        self.assertEqual(out.returncode, 0, out.stderr)
+        with open(saved) as f:
+            self.assertEqual(f.read(), "title: Demo Matrix table\n")
+
     @unittest.skipUnless(shutil.which("node"), "node not installed")
     def test_end_to_end_build(self):
         self.assertEqual(
@@ -428,6 +499,178 @@ class ScaffoldTest(unittest.TestCase):
             )
             self.assertEqual(res.returncode, 0, res.stderr)
         self.assertTrue(os.path.exists(os.path.join(self.tmp, "dist", "data.json")))
+
+    @unittest.skipUnless(shutil.which("node"), "node not installed")
+    def test_end_to_end_build_requirement(self):
+        fixtures = os.path.join(HERE, "fixtures")
+        mapping = os.path.join(fixtures, "requirement-mapping.yaml")
+        self.assertEqual(
+            self.scaffold("--deploy-branch", "matrix-table-demo").returncode, 0
+        )
+        data = os.path.join(self.repo, "matrix-table", "data")
+        out = run(
+            os.path.join(SCRIPTS, "convert_csv.py"),
+            "--mapping",
+            mapping,
+            "--csv",
+            os.path.join(fixtures, "requirement.csv"),
+            "--out",
+            data,
+        )
+        self.assertEqual(out.returncode, 0, out.stdout)
+        build = os.path.join(self.repo, "matrix-table", "tools", "build.mjs")
+        for args in (["format"], ["check"], ["build", os.path.join(self.tmp, "dist")]):
+            res = subprocess.run(
+                ["node", build, *args], check=False, capture_output=True, text=True
+            )
+            self.assertEqual(res.returncode, 0, res.stderr)
+            if args == ["check"]:
+                self.assertNotIn("warning:", res.stdout + res.stderr)
+            if args[0] == "build":
+                self.assertIn("9 requirements", res.stdout)
+        self.assertTrue(os.path.exists(os.path.join(self.tmp, "dist", "data.json")))
+
+    @unittest.skipUnless(shutil.which("node"), "node not installed")
+    def test_feature_meta_errors_are_reported_without_stack_trace(self):
+        self.assertEqual(
+            self.scaffold("--deploy-branch", "matrix-table-demo").returncode, 0
+        )
+        data = os.path.join(self.repo, "matrix-table", "data")
+        os.makedirs(data, exist_ok=True)
+        meta = {
+            "title": "Demo",
+            "repository": {"path": "matrix-table/data"},
+            "sections": [{"id": "A", "name": "S"}],
+            "platforms": [{"id": "p1", "name": "P1"}],
+            "columns": [{"id": "c1", "name": "C", "platform": "p1"}],
+            "some_unknown_key": True,
+        }
+        build = os.path.join(self.repo, "matrix-table", "tools", "build.mjs")
+        meta_path = os.path.join(data, "_meta.yaml")
+
+        def check():
+            with open(meta_path, "w") as f:
+                yaml.safe_dump(meta, f)
+            return subprocess.run(
+                ["node", build, "check"], check=False, capture_output=True, text=True
+            )
+
+        self.assertEqual(check().returncode, 0)
+        meta["columns"] = [None]
+        res = check()
+        self.assertEqual(res.returncode, 1, res.stdout)
+        self.assertIn("error: _meta.yaml: column 1 must be a mapping", res.stderr)
+        self.assertNotIn("    at ", res.stderr)
+
+    @unittest.skipUnless(shutil.which("node"), "node not installed")
+    def test_unquoted_numeric_id_fails_check(self):
+        self.assertEqual(
+            self.scaffold("--deploy-branch", "matrix-table-demo").returncode, 0
+        )
+        data = os.path.join(self.repo, "matrix-table", "data")
+        os.makedirs(data, exist_ok=True)
+        meta = {
+            "title": "Demo",
+            "repository": {"path": "matrix-table/data"},
+            "template": "requirement-matrix",
+            "noun": ["requirement", "requirements"],
+            "sections": [{"id": "A", "name": "Requirements"}],
+            "platforms": [{"id": "platform-1", "name": "Platform 1"}],
+            "status_sets": {
+                "requirement": [
+                    {
+                        "id": "supported",
+                        "label": "Supported",
+                        "resolved": True,
+                        "tone": "yes",
+                    },
+                    {"id": "tbd", "label": "TBD", "resolved": False, "tone": "open"},
+                ]
+            },
+            "fields": [
+                {
+                    "id": "scope",
+                    "name": "Scope",
+                    "type": "enum",
+                    "values": [{"id": "in-scope", "label": "In Scope"}],
+                }
+            ],
+            "note_keys": [{"id": "x01", "name": "x01"}],
+            "columns": [
+                {
+                    "id": "p1-x01",
+                    "name": "x01",
+                    "platform": "platform-1",
+                    "status_set": "requirement",
+                    "note_key": "x01",
+                }
+            ],
+        }
+        with open(os.path.join(data, "_meta.yaml"), "w") as f:
+            yaml.safe_dump(meta, f)
+        with open(os.path.join(data, "A.01-demo.yaml"), "w") as f:
+            f.write("id: A.1\nname: Demo\nfeatures:\n  - id: 2.10\n    name: GPU\n")
+        build = os.path.join(self.repo, "matrix-table", "tools", "build.mjs")
+        res = subprocess.run(
+            ["node", build, "check"], check=False, capture_output=True, text=True
+        )
+        self.assertEqual(res.returncode, 1, res.stdout)
+        self.assertIn("A.01-demo.yaml", res.stderr)
+        self.assertIn("quoted string", res.stderr)
+
+
+@unittest.skipUnless(shutil.which("node"), "node is required")
+class GoldenFeatureTest(unittest.TestCase):
+    CSV = os.path.join(HERE, "fixtures", "feature.csv")
+    MAPPING = os.path.join(HERE, "fixtures", "feature-mapping.yaml")
+
+    def test_matches_golden(self):
+        res = run(
+            os.path.join(HERE, "golden_tool.py"),
+            "--csv",
+            self.CSV,
+            "--mapping",
+            self.MAPPING,
+            "--golden",
+            os.path.join(HERE, "golden", "feature"),
+        )
+        self.assertEqual(res.returncode, 0, res.stdout + res.stderr)
+
+    def test_fixture_covers_paths(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            res = run(
+                os.path.join(SCRIPTS, "convert_csv.py"),
+                "--mapping",
+                self.MAPPING,
+                "--csv",
+                self.CSV,
+                "--out",
+                tmp,
+            )
+            self.assertEqual(res.returncode, 0, res.stdout)
+            comps = []
+            meta = None
+            for name in sorted(os.listdir(tmp)):
+                with open(os.path.join(tmp, name), encoding="utf-8") as f:
+                    doc = yaml.safe_load(f)
+                if name == "_meta.yaml":
+                    meta = doc
+                else:
+                    comps.append(doc)
+        feats = [f for c in comps for f in c["features"]]
+        notes = [n for f in feats for n in (f.get("notes") or {}).items()]
+        self.assertTrue(any(s.get("notes") for s in meta["sections"]))
+        self.assertTrue(any(c.get("description") for c in comps))
+        self.assertTrue(any(f.get("label") for f in feats))
+        inline = [
+            v for k, v in notes if k == "board-y" and v.startswith("PROJ-3: [BoardY]")
+        ]
+        self.assertTrue(inline)
+        self.assertTrue(any("[build]" in v for _, v in notes))
+        self.assertTrue(any("PROJ-7" in v for _, v in notes))
+        used = {k for f in feats for k in f.get("status", {})}
+        self.assertIn("board-y-ga", {c["id"] for c in meta["columns"]})
+        self.assertNotIn("board-y-ga", used)
 
 
 FAKE_GH = r'''#!/usr/bin/env python3
@@ -591,6 +834,32 @@ class NodeTestsTest(unittest.TestCase):
             ["node", "--test", HERE], check=False, capture_output=True, text=True
         )
         self.assertEqual(res.returncode, 0, res.stdout[-2000:] + res.stderr[-2000:])
+
+
+@unittest.skipUnless(shutil.which("node"), "node not installed")
+@unittest.skipUnless(shutil.which("google-chrome"), "google-chrome not installed")
+class BrowserTest(unittest.TestCase):
+    """Drives the built site in headless Chrome against a fake GitHub and compares DOM snapshots."""
+
+    def test_feature_dom(self):
+        res = subprocess.run(
+            ["node", os.path.join(HERE, "browser", "run.mjs"), "feature"],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=300,
+        )
+        self.assertEqual(res.returncode, 0, res.stdout[-3000:] + res.stderr[-2000:])
+
+    def test_requirement_ui(self):
+        res = subprocess.run(
+            ["node", os.path.join(HERE, "browser", "run.mjs"), "requirement"],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=300,
+        )
+        self.assertEqual(res.returncode, 0, res.stdout[-3000:] + res.stderr[-2000:])
 
 
 if __name__ == "__main__":

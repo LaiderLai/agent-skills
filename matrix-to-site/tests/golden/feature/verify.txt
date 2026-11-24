@@ -1,0 +1,10 @@
+wrote 4 component files + _meta.yaml to <data>
+
+4 components, 12 features, 2 sections
+column                                            csv                         yaml
+soc                      {'supported': 8, 'tbd': 3, 'unsupported': 1} {'supported': 8, 'tbd': 3, 'unsupported': 1}  OK
+board-x-ea               {'supported': 7, 'tbd': 2, 'unsupported': 3} {'supported': 7, 'tbd': 2, 'unsupported': 3}  OK
+board-x-ga               {'supported': 5, 'tbd': 4, 'unsupported': 3} {'supported': 5, 'tbd': 4, 'unsupported': 3}  OK
+board-y-beta             {'supported': 4, 'unsupported': 6, 'tbd': 1} {'supported': 4, 'unsupported': 6, 'tbd': 1}  OK
+board-y-ga                                         {}                           {}  OK
+notes by key: {'board-x': 6, 'board-y': 5}
